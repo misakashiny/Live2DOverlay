@@ -232,6 +232,14 @@
                 android:id="@+id/seek_alpha"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
+            <!-- v1.6.0：说明 80% 是平台硬上限，避免用户以为滑条坏了 -->
+            <TextView
+                android:id="@+id/tv_alpha_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="滑到 100% 即为系统允许的最不透明状态。Android 12 起，带「触摸穿透」的悬浮窗不透明度被系统限制在 80%，应用无法突破。"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
 
             <!-- 缩放 -->
             <LinearLayout

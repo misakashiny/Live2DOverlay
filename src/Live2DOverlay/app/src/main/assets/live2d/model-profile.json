@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "Live2D 模型档案（model-profile）。把「动作库 / 参数映射 / 水印参数」从代码里外置出来，",
+    "换模型时只改本文件，不必动 live2d_decor.html。",
+    "",
+    "加载优先级（Android 侧 loadModelProfile）：",
+    "  1. <模型目录>/model-profile.json   —— 随模型走，优先级最高（放 /sdcard 上可热改）",
+    "  2. assets/live2d/model-profile.json —— 本文件，内置兜底",
+    "  3. 两者都读不到 → 页面使用内置硬编码动作库（MODEL_ACTIONS），功能不受影响",
+    "",
+    "★ 本文件只描述「数据」，不含任何逻辑。页面把 set/clear 编译成函数。",
+    "★ 本模型（miku）的 model3.json 没有 Motions / Expressions 段，",
+    "  所有动作都由 moc3 内部参数直接驱动，故这里是「参数 → 值」的映射。"
+  ],
+
+  "schemaVersion": 1,
+  "id": "miku",
+  "label": "初音未来",
+
+  "watermark": {
+    "_comment": "★ 反向语义：hiddenValue = 1 才是隐藏（模型默认 0 = 显示）",
+    "param": "Param137",
+    "hiddenValue": 1.0
+  },
+
+  "layout": {
+    "_comment": "可选。留空则由页面按屏幕自动计算；触摸模式下位置由拖拽接管。",
+    "clipBottomDesignY": 546.5
+  },
+
+  "actions": [
+    {
+      "name": "拿葱",
+      "ms": 2600,
+      "set": { "Param133": 1.0, "Param134": 0.0, "Param135": 0.0 },
+      "clear": { "Param133": 0.0 }
+    },
+    {
+      "name": "唱歌",
+      "ms": 2600,
+      "set": { "Param134": 1.0, "Param133": 0.0, "Param135": 0.0 },
+      "clear": { "Param134": 0.0 }
+    },
+    {
+      "name": "比心",
+      "ms": 2600,
+      "set": { "Param135": 1.0, "Param133": 0.0, "Param134": 0.0 },
+      "clear": { "Param135": 0.0 }
+    },
+    {
+      "name": "前倾",
+      "ms": 1800,
+      "set": { "Param132": 1.0 },
+      "clear": { "Param132": 0.0 }
+    },
+    {
+      "name": "圈圈",
+      "ms": 2400,
+      "set": { "Param125": 1.0 },
+      "clear": { "Param125": 0.0 }
+    },
+    {
+      "name": "脸红",
+      "ms": 2600,
+      "set": { "Param130": 1.0 },
+      "clear": { "Param130": 0.0 }
+    },
+    {
+      "name": "QQ人",
+      "ms": 3200,
+      "_comment": "QQ 人是 Add 混合：131 与 136 必须同时为 1 才生效",
+      "set": { "Param131": 1.0, "Param136": 1.0 },
+      "clear": { "Param131": 0.0, "Param136": 0.0 }
+    }
+  ]
+}

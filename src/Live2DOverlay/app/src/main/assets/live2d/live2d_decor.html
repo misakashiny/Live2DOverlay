@@ -140,6 +140,11 @@
    */
   const WATERMARK_HIDDEN_VALUE = 1.0;
 
+  // v1.6.0：水印参数外置（可由 model-profile.json 覆盖），默认沿用上面的常量。
+  // 反向语义（1 = 隐藏）保留在 hiddenValue 里，换模型时只改 JSON。
+  let watermarkParamId = "Param137";
+  let watermarkHiddenValue = WATERMARK_HIDDEN_VALUE;
+
   let centerX = parseFloat(params.get("cx") || "1448") || 1448;
   let centerY = parseFloat(params.get("cy") || "420") || 420;
   let userScale = parseFloat(params.get("scale") || "1") || 1;
@@ -824,7 +829,7 @@
   // 下面把这 8 个自带动作从 exp3 文件里原样搬进页面，做成可以随机的动作库。
   //   hold 字段：动作结束后需要保持的值（不写则自动回到收敛态的 0）
   //   ms   ：动作持续时长
-  const MODEL_ACTIONS = [
+  let MODEL_ACTIONS = [
     {
       name: "拿葱",
       ms: 2600,
@@ -905,6 +910,85 @@
       }
     }
   ];
+
+  // ==================================================================
+  // v1.6.0（迭代清单 P2-3）：模型档案外置
+  //
+  // 上面这份 MODEL_ACTIONS 是**内置兜底**。Android 侧读到 model-profile.json 后
+  // 会调 window.__mikuLive2DApplyProfile(json) 覆盖它；读不到就沿用内置的，
+  // 所以「外置文件缺失 / 格式错误」都不会让短按彻底没反应。
+  //
+  // 为什么由 Android 注入而不是页面 fetch：
+  //   页面以 file:///android_asset/ 加载，对同目录 JSON 发 fetch/XHR 受
+  //   file:// 同源策略限制，各 ROM 行为不一致；由原生读文件再注入最稳，
+  //   而且能顺带支持「每个模型目录各自一份 model-profile.json」。
+  // ==================================================================
+  let modelProfileDesc = "(内置)";
+
+  /** 把 JSON 里的 set/clear 数据表编译成与内置动作同构的函数 */
+  function buildActionsFromProfile(profile) {
+    if (!profile || !Array.isArray(profile.actions) || profile.actions.length === 0) return null;
+    const out = [];
+    for (let i = 0; i < profile.actions.length; i++) {
+      const a = profile.actions[i];
+      if (!a || typeof a.name !== "string" || !a.set) continue;
+      // 用局部常量固化本项的映射表，避免闭包串味
+      const setMap = a.set;
+      const clearMap = a.clear || {};
+      out.push({
+        name: a.name,
+        ms: (typeof a.ms === "number" && a.ms > 0) ? a.ms : 2600,
+        apply: function() {
+          for (const k in setMap) {
+            if (Object.prototype.hasOwnProperty.call(setMap, k)) setParam(k, setMap[k]);
+          }
+        },
+        clear: function() {
+          for (const k in clearMap) {
+            if (Object.prototype.hasOwnProperty.call(clearMap, k)) setParam(k, clearMap[k]);
+          }
+        }
+      });
+    }
+    return out.length > 0 ? out : null;
+  }
+
+  /**
+   * Android → 页面：应用模型档案。
+   * ★ 校验失败时**保持内置兜底**，绝不把动作库清空。
+   */
+  window.__mikuLive2DApplyProfile = function(profile) {
+    try {
+      const built = buildActionsFromProfile(profile);
+      if (!built) {
+        LOG.w(M.MOTION, "模型档案无效，沿用内置动作库",
+          "actions=" + (profile && profile.actions ? profile.actions.length : "n/a"));
+        return false;
+      }
+      MODEL_ACTIONS = built;
+      modelProfileDesc = (profile.id || "?") + "/" + built.length + "项";
+      lastActionIndex = -1;
+      // 动作库换了，进行中的动作必须作废，否则会用旧参数表去 clear
+      activeAction = null;
+      activeActionStartSec = -1;
+      activeActionUntilSec = -1;
+      if (profile.watermark && typeof profile.watermark.param === "string") {
+        watermarkParamId = profile.watermark.param;
+        if (typeof profile.watermark.hiddenValue === "number") {
+          watermarkHiddenValue = profile.watermark.hiddenValue;
+        }
+        // 参数变了要重装压制器
+        watermarkSuppressorInstalled = false;
+        installWatermarkSuppressor();
+      }
+      LOG.i(M.MOTION, "模型档案已应用",
+        "id=" + modelProfileDesc + " 水印参数=" + watermarkParamId + " hideValue=" + watermarkHiddenValue);
+      return true;
+    } catch (e) {
+      LOG.w(M.MOTION, "模型档案应用失败，沿用内置动作库", "err=" + (e && e.message ? e.message : e));
+      return false;
+    }
+  };
 
   let activeAction = null;          // 当前正在播放的自带动作
   let activeActionStartSec = -1;
@@ -1044,7 +1128,7 @@
    * 模型每帧的参数求值会把它重置为 0，因此必须持续压制。
    */
   function forceWatermarkOff() {
-    setParam("Param137", WATERMARK_HIDDEN_VALUE);
+    setParam(watermarkParamId, watermarkHiddenValue);
   }
 
   let watermarkSuppressorInstalled = false;
@@ -1065,11 +1149,11 @@
         // watermark=1 表示用户想「显示水印」，此时不压制（保持默认 0 即显示）
         if (watermarkVisible) return;
         if (WATERMARK_SUPPRESS_ENABLED) {
-          setParam("Param137", WATERMARK_HIDDEN_VALUE);
+          setParam(watermarkParamId, watermarkHiddenValue);
         }
       });
       watermarkSuppressorInstalled = true;
-      LOG.i(M.WM, "水印压制器已安装", "hideValue=" + WATERMARK_HIDDEN_VALUE);
+      LOG.i(M.WM, "水印压制器已安装", "param=" + watermarkParamId + " hideValue=" + watermarkHiddenValue);
     } catch (e) {
       LOG.e(M.WM, "水印压制器安装失败", "err=" + (e && e.message));
     }

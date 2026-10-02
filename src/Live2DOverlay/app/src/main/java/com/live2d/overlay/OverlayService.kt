@@ -99,6 +99,26 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         /** v1.5.0：缩放推送节流间隔（ms）——手指每动一像素就注入一次 JS 会拖住主线程 */
         const val SCALE_PUSH_INTERVAL_MS = 60L
 
+        /**
+         * v1.6.0：整体透明度的**真实可达上限**。
+         *
+         * Android 12+ 对带 FLAG_NOT_TOUCHABLE 的系统悬浮窗强制把 alpha 压到 0.8
+         * （系统原话见 makeRenderWindowPassThrough 的注释）。两条突破路径均已实测证伪：
+         * 反射 touchableRegion（本机无该成员）、maximum_obscuring_opacity_for_touch=1.0
+         * （重启后仍压制）。因此在「全屏穿透式悬浮窗」形态下 0.8 就是天花板。
+         *
+         * 既然突破不了，就把滑条语义改成**诚实的**：0~100% 线性映射到 0~0.8。
+         * 好处有三：
+         *   1. 滑到 100% 拿到的就是系统允许的最不透明状态，不会让人误以为还能更高；
+         *   2. 全程不再触发系统的压制逻辑，logcat 里不会再有那条告警；
+         *   3. 0~80% 区间的滑条手感与视觉变化是线性的，不会出现「80 以上推了没反应」。
+         */
+        const val MAX_OVERLAY_ALPHA = 0.8f
+
+        /** 把 0~100 的滑条值换算成窗口 alpha（0 ~ MAX_OVERLAY_ALPHA） */
+        fun sliderToAlpha(slider: Int): Float =
+            MAX_OVERLAY_ALPHA * (slider.coerceIn(0, 100) / 100f)
+
         @Volatile
         var isRunning: Boolean = false
             private set
@@ -113,15 +133,13 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     private var bridge: Live2DJSBridge? = null
     private var windowParams: WindowManager.LayoutParams? = null
 
-    // v1.4.0（Bug-B2）：捕获窗口的实时几何信息。
+    // v1.6.0（Bug-017）：捕获窗口的几何信息**不再需要**发布给触摸转发。
     //
-    // 触摸监听器必须读取「当前值」而非创建时的快照 —— 拖拽过程中捕获窗口
-    // 持续移动，若转发时用的是过期偏移，页面收到的坐标会持续漂移。
-    // 用 @Volatile 是因为写入发生在主线程，读取发生在 View 的输入派发路径。
-    @Volatile private var catcherOffsetX: Int = 0
-    @Volatile private var catcherOffsetY: Int = 0
-    @Volatile private var catcherScaleX: Float = 1f
-    @Volatile private var catcherScaleY: Float = 1f
+    // v1.4.0 曾用 @Volatile 的 catcherOffsetX/Y/ScaleX/Y 解决「闭包捕获旧偏移」，
+    // 但那只是半个修复：偏移量本身与「事件生成时刻」之间永远存在竞态
+    // （syncTouchCatcher 发布偏移 → updateViewLayout 经 Binder 异步生效）。
+    // 现改为直接用 ev.rawX/rawY 取屏幕坐标，这两个字段及其发布逻辑已全部移除。
+    // 详见 forwardTouchToWebView() 的注释。
 
     /** 触摸交互总开关（由设置项控制） */
     private var touchEnabled: Boolean = true
@@ -317,7 +335,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
             // 界面滑条写了 SharedPreferences，但窗口和页面从不消费它，导致
             // 100% 与 30% 视觉上完全一致。这里直接在窗口层级生效：窗口 alpha
             // 作用于整棵 View 树，无需页面配合，也不与模型自身的 alpha 冲突。
-            alpha = (config.overlayAlpha.coerceIn(0, 100)) / 100f
+            //
+            // v1.6.0：改用 sliderToAlpha()，把 0~100 映射到 0~0.8（真实可达上限）。
+            alpha = sliderToAlpha(config.overlayAlpha)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -362,7 +382,7 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     private fun applyWindowAlpha() {
         val container = rootView ?: return
         val params = windowParams ?: return
-        val a = (config.overlayAlpha.coerceIn(0, 100)) / 100f
+        val a = sliderToAlpha(config.overlayAlpha)
         if (params.alpha == a) return
         params.alpha = a
         try {
@@ -443,13 +463,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         w = w.coerceAtLeast(1).coerceAtMost(screenW.toInt() - x)
         h = h.coerceAtLeast(1).coerceAtMost(screenH.toInt() - y)
 
-        // v1.4.0（Bug-B2）：把「最终生效的」窗口偏移与换算比例发布给触摸转发。
-        // 必须在夹取之后 —— 触摸坐标换算必须用窗口真正落地的位置，
-        // 否则边缘场景下（夹取修正过）会出现系统性偏移。
-        catcherOffsetX = x
-        catcherOffsetY = y
-        catcherScaleX = scaleX
-        catcherScaleY = scaleY
+        // v1.6.0（Bug-017）：这里不再发布窗口偏移与换算比例。
+        // 触摸转发改用 ev.rawX/rawY（屏幕坐标），与窗口位置解耦，
+        // 从根上消除「新偏移 + 旧局部坐标」的竞态（拖动时模型跳动的根因）。
 
         val params = WindowManager.LayoutParams(
             w,
@@ -493,13 +509,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 // v1.5.0：双指缩放。识别必须在原生侧做 —— 转发给 WebView 的是
                 // 单点合成事件，页面永远收不到第二根手指，无法自行识别 pinch。
                 if (handlePinch(ev)) return@setOnTouchListener true
-                forwardTouchToWebView(
-                    ev,
-                    catcherOffsetX,
-                    catcherOffsetY,
-                    catcherScaleX,
-                    catcherScaleY
-                )
+                // v1.6.0（Bug-017）：不再传窗口偏移，改用 ev.rawX/rawY 取屏幕坐标，
+                // 详见 forwardTouchToWebView 的注释。
+                forwardTouchToWebView(ev)
                 true
             }
             try {
@@ -634,30 +646,36 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     }
 
     /**
-     * 把捕获窗口收到的事件转成渲染层 WebView 的坐标并投递。
+     * 把捕获窗口收到的事件投递到渲染层 WebView。
      *
-     * 换算关系：WebView 是全屏 View，其 CSS 坐标 = 捕获窗口坐标 + 窗口偏移，
-     * 再按 CSS/屏幕 比例缩放。这里直接构造一个新的 MotionEvent 注入 WebView。
+     * ★ 坐标必须用 `ev.rawX / rawY`（屏幕坐标），**不能**用 `ev.x + 窗口偏移`。
+     *
+     * 为什么（Bug-017，拖动时模型闪现跳动的真正根因）：
+     *   `ev.x` 是「事件生成那一刻」相对捕获窗口的局部坐标，而窗口偏移是
+     *   `syncTouchCatcher()` 刚发布的值 —— 但 `updateViewLayout()` 要经 Binder
+     *   异步生效。于是窗口移动后的那几帧里，「新偏移 + 旧局部坐标」算出的屏幕坐标
+     *   会整体偏掉一个位移量。
+     *
+     *   拖动时捕获窗口每帧都跟着模型移动，于是形成自激振荡：
+     *   窗口移动 → 坐标偏掉 → 页面按增量又把模型挪一次 → 命中区再移动 → 再偏掉…
+     *   页面侧 `model.x += x - pointerLastX` 是**增量**累加，所以每一次偏差都会
+     *   永久留在模型位置上 → 表现为「拖动时到处闪 / 跳动」。
+     *
+     *   `rawX / rawY` 由输入系统按显示坐标给出，与窗口位置、与我们的记账**都无关**，
+     *   从根上消除这类误差。（v1.4.0 的 Bug-013 只修了「闭包捕获旧偏移」那一半，
+     *   另一半就是这里。）
+     *
+     * WebView 铺满全屏且位于 (0,0)，其 View 坐标系即屏幕坐标系，
+     * 故可直接把屏幕坐标当作 WebView 局部坐标投递。
      */
-    private fun forwardTouchToWebView(
-        ev: android.view.MotionEvent,
-        offsetX: Int,
-        offsetY: Int,
-        scaleX: Float,
-        scaleY: Float
-    ) {
+    private fun forwardTouchToWebView(ev: android.view.MotionEvent) {
         val wv = webView ?: return
-        // 捕获窗口内坐标 → 屏幕坐标
-        val screenX = ev.x + offsetX
-        val screenY = ev.y + offsetY
-        // 屏幕坐标 → CSS 坐标由 WebView 自行处理，这里直接给屏幕坐标即可，
-        // 因为 WebView 铺满全屏，其 View 坐标系就是屏幕坐标系。
         val converted = android.view.MotionEvent.obtain(
             ev.downTime,
             ev.eventTime,
             ev.action,
-            screenX,
-            screenY,
+            ev.rawX,
+            ev.rawY,
             ev.metaState
         )
         wv.dispatchTouchEvent(converted)
@@ -805,6 +823,10 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
             override fun onPageFinished(view: WebView?, url: String?) {
                 L2DLog.d(L2DLog.Mod.RENDER, "页面加载完成", "url=$url")
                 pushTouchModeToPage()
+                // v1.6.0（P2-3）：页面脚本已就绪，注入模型档案覆盖内置动作库。
+                // 必须在 onPageFinished 之后 —— 页面的 __mikuLive2DApplyProfile
+                // 定义在内联 <script> 里，此时已可用。
+                pushModelProfileToPage()
             }
 
             override fun onReceivedError(
@@ -843,6 +865,63 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         }
 
         return wv
+    }
+
+    // ------------------------------------------------------------------
+    // v1.6.0（迭代清单 P2-3）：模型档案外置
+    // ------------------------------------------------------------------
+
+    /**
+     * 把 model-profile.json 注入页面，覆盖页面内置的动作库。
+     *
+     * 加载优先级：
+     *   1. `<模型目录>/model-profile.json` —— 随模型走，放 /sdcard 上可热改
+     *   2. `assets/live2d/model-profile.json` —— 内置兜底
+     *   3. 都读不到 → **不注入**，页面沿用内置 MODEL_ACTIONS（短按仍可用）
+     *
+     * 为什么由原生读文件再注入，而不是让页面自己 fetch：
+     *   页面以 `file:///android_asset/` 加载，对同目录 JSON 发 fetch/XHR 会受
+     *   file:// 同源策略限制，各 ROM 行为不一致。原生读文件最稳，而且顺带支持
+     *   「每个模型目录各自一份档案」——这比单一全局档案更符合换模型免改代码的目标。
+     */
+    private fun pushModelProfileToPage() {
+        val wv = webView ?: return
+        val json = loadModelProfileJson() ?: return
+        // 直接以 JSON 字面量作为实参。档案由我们自己生成或用户手写，
+        // 页面侧 __mikuLive2DApplyProfile 会做结构校验，非法时保持内置兜底。
+        wv.evaluateJavascript(
+            "window.__mikuLive2DApplyProfile && window.__mikuLive2DApplyProfile($json)",
+            null
+        )
+    }
+
+    /** 依次尝试「模型目录旁的档案」→「assets 内置档案」；都读不到返回 null */
+    private fun loadModelProfileJson(): String? {
+        try {
+            val mp = config.modelPath
+            if (mp.startsWith("file://")) {
+                val modelFile = java.io.File(android.net.Uri.parse(mp).path ?: "")
+                val f = java.io.File(modelFile.parentFile, "model-profile.json")
+                if (f.isFile) {
+                    val text = f.readText()
+                    L2DLog.i(L2DLog.Mod.MOTION, "使用模型目录内的档案",
+                        "path=${f.absolutePath} bytes=${text.length}")
+                    return text
+                }
+            }
+        } catch (t: Throwable) {
+            L2DLog.w(L2DLog.Mod.MOTION, "读取模型目录档案失败", "err=${t.javaClass.simpleName}")
+        }
+        return try {
+            val text = assets.open("live2d/model-profile.json")
+                .bufferedReader().use { it.readText() }
+            L2DLog.i(L2DLog.Mod.MOTION, "使用内置模型档案", "bytes=${text.length}")
+            text
+        } catch (t: Throwable) {
+            L2DLog.w(L2DLog.Mod.MOTION, "内置模型档案缺失，沿用页面内置动作库",
+                "err=${t.javaClass.simpleName}")
+            null
+        }
     }
 
     private fun loadPage(wv: WebView) {
