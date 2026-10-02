@@ -469,15 +469,15 @@ class MainActivity : AppCompatActivity() {
      */
     private fun pushPageOption(key: String, on: Boolean) {
         if (!OverlayService.isRunning) return
-        val js = when (key) {
-            "cycle" -> "window.__mikuLive2DSetActionCycle && window.__mikuLive2DSetActionCycle(${if (on) 1 else 0})"
-            "fx", "snap" ->
-                "window.__mikuLive2DSetOption && window.__mikuLive2DSetOption('$key', ${if (on) 1 else 0})"
-            else -> return
-        }
+        if (key != "cycle" && key != "fx" && key != "snap") return
+        // v1.7.1（P0-4）：改走专用 action。
+        // 原来借道 ACTION_DEBUG_JS 注入整段 JS —— 功能虽能用，却让那条调试通道
+        // 无法加 debug 守卫（一收 release 下开关就失效）。现在只传 key/on，
+        // 由服务侧按白名单拼 JS，调试通道得以在 release 下彻底关闭。
         val svc = Intent(this, OverlayService::class.java).apply {
-            setAction(OverlayService.ACTION_DEBUG_JS)
-            putExtra("js", js)
+            setAction(OverlayService.ACTION_SET_PAGE_OPTION)
+            putExtra("key", key)
+            putExtra("on", on)
         }
         safeStartService(svc)
     }

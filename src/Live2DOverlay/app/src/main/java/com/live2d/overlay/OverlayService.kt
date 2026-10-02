@@ -86,8 +86,23 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         /** 触摸交互是否启用（关闭后回到 v1.0 的整窗穿透行为） */
         const val ACTION_SET_TOUCHABLE = "com.live2d.overlay.action.SET_TOUCHABLE"
 
-        /** v1.2.0 调试通道：向页面注入一段 JS（开发排查用） */
+        /**
+         * v1.2.0 调试通道：向页面注入一段 JS。
+         *
+         * ★ v1.7.1 起**仅 debug 构建可用**（见 onStartCommand 里的 BuildConfig.DEBUG 判定）。
+         * 正式功能不要再借道这里 —— 原来三个热切换开关就是这么用的，
+         * 结果这条通道无法收口（一收 release 下开关就失效）。
+         */
         const val ACTION_DEBUG_JS = "com.live2d.overlay.action.DEBUG_JS"
+
+        /**
+         * v1.7.1（迭代清单 P0-4）：页面开关热切换 —— 点击特效 / 边缘吸附 / 动作轮播。
+         *
+         * 从 ACTION_DEBUG_JS 独立出来的原因：那是「注入任意 JS」的调试口，必须能加
+         * debug 守卫；而这三个开关是正式功能，release 下也要能用。本 action 只接受
+         * 白名单内的 key，不接受任意 JS 片段。
+         */
+        const val ACTION_SET_PAGE_OPTION = "com.live2d.overlay.action.SET_PAGE_OPTION"
 
         /** v1.4.0：仅更新窗口透明度，不重载页面（Bug-A 修复配套） */
         const val ACTION_SET_ALPHA = "com.live2d.overlay.action.SET_ALPHA"
@@ -204,7 +219,15 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
             }
             ACTION_DEBUG_JS -> {
                 // v1.2.0：调试通道。把 extra 里的 JS 片段注入页面执行。
-                // 仅用于开发期排查（如水印参数溯源），不参与正常业务。
+                //
+                // ★ v1.7.1（P0-4）：**release 构建直接忽略**。
+                // 这条通道能注入任意 JS（读模型、改参数、发网络请求），不设防就是
+                // 发布级安全面。debug 构建保留，便于真机溯源（如水印参数审计）。
+                // 三个正式的热切换开关已改走 ACTION_SET_PAGE_OPTION，不受影响。
+                if (!BuildConfig.DEBUG) {
+                    L2DLog.w(L2DLog.Mod.SVC, "已忽略调试 JS 注入（release 构建）", "action=DEBUG_JS")
+                    return START_STICKY
+                }
                 val js = intent.getStringExtra("js")
                 val wv = webView
                 if (!js.isNullOrEmpty() && wv != null) {
@@ -214,6 +237,10 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                         L2DLog.e(L2DLog.Mod.SVC, "调试 JS 注入失败", "", t)
                     }
                 }
+                return START_STICKY
+            }
+            ACTION_SET_PAGE_OPTION -> {
+                applyPageOption(intent.getStringExtra("key"), intent.getBooleanExtra("on", false))
                 return START_STICKY
             }
             else -> {
@@ -541,6 +568,15 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     private var pinchBaseScale = 1f
     private var lastScalePushAt = 0L
 
+    /**
+     * v1.7.1：双指手势收尾后，紧接着到来的那个 ACTION_UP 要吃掉。
+     *
+     * 双指抬起的事件序列是 POINTER_UP(2) → UP(1)。POINTER_UP 里已把 pinchActive
+     * 归位，于是后面的 UP 会落到转发路径，被页面当成一次「点击」——白播一个动作
+     * 外加一次点击特效。用这个标志把它拦掉。
+     */
+    private var suppressNextUp = false
+
     /** 取两个手指的当前距离；不足两指或取值异常时返回 0 */
     private fun pointerDistance(ev: android.view.MotionEvent): Float {
         if (ev.pointerCount < 2) return 0f
@@ -578,7 +614,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                             "baseScale=" + String.format("%.2f", pinchBaseScale))
                     }
                 }
-                return pinchActive
+                // ★ 始终消费 POINTER_DOWN：多指事件对「只收单点」的页面毫无意义，
+                // 放行到转发路径还会因单点重载构造出 pointerIndex 越界的事件而崩溃。
+                return true
             }
 
             android.view.MotionEvent.ACTION_MOVE -> {
@@ -601,11 +639,19 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                     L2DLog.i(L2DLog.Mod.TOUCH, "双指缩放结束",
                         "scale=" + String.format("%.2f", config.scale))
                 }
-                return pinchActive
+                // ★ 始终消费 POINTER_UP（原因同 POINTER_DOWN），并标记吃掉紧随其后的 UP。
+                suppressNextUp = true
+                return true
             }
 
             android.view.MotionEvent.ACTION_UP,
             android.view.MotionEvent.ACTION_CANCEL -> {
+                // 双指手势的收尾 UP：吃掉，否则页面会当成一次点击（白播动作 + 特效）
+                if (suppressNextUp) {
+                    suppressNextUp = false
+                    pinchActive = false
+                    return true
+                }
                 if (pinchActive) {
                     pinchActive = false
                     applyUserScale(config.scale, force = true)
@@ -670,6 +716,31 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
      */
     private fun forwardTouchToWebView(ev: android.view.MotionEvent) {
         val wv = webView ?: return
+
+        // ★★ 只能转发「单点」事件，且绝不能转发 POINTER_DOWN / POINTER_UP。
+        //
+        // 下面用的是单点重载 MotionEvent.obtain(downTime, eventTime, action, x, y, metaState)，
+        // 它构造出的 pointerCount 恒为 1；而 ACTION_POINTER_DOWN / ACTION_POINTER_UP 的
+        // action 里**编码了 pointerIndex**（如 POINTER_UP(1) 表示「下标 1 的手指抬起」）。
+        // 一旦把这种 action 交给 ViewGroup.dispatchTouchEvent，它会去调
+        // getPointerId(1) —— 而事件里只有 1 个指针 → 越界 → 崩溃。
+        //
+        // 真机崩溃证据（dropbox，v1.7.0，用户双指缩小到下限时连续触发两次）：
+        //   java.lang.IllegalArgumentException: invalid pointerIndex 1 for MotionEvent
+        //     { action=POINTER_UP(1), id[0]=0, ... }
+        //       at MotionEvent.getPointerId
+        //       at ViewGroup.dispatchTouchEvent
+        //       at OverlayService.forwardTouchToWebView(OverlayService.kt:681)
+        //   另一次同源 native crash：SIGABRT /
+        //   "JNI DETECTED ERROR: JNI CallVoidMethodV called with pending exception"
+        //
+        // 页面本来就只能理解单点事件（原生只转发单点），所以直接丢弃是正确行为。
+        if (ev.pointerCount != 1) return
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_POINTER_DOWN,
+            android.view.MotionEvent.ACTION_POINTER_UP -> return
+        }
+
         val converted = android.view.MotionEvent.obtain(
             ev.downTime,
             ev.eventTime,
@@ -768,6 +839,23 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
      */
     private inner class TouchRoutingFrame(context: Context) :
         android.widget.FrameLayout(context)
+
+    /**
+     * v1.7.1（P0-4）：应用一个页面开关。
+     *
+     * 只认白名单 key，不接受任意 JS —— 这是它与 ACTION_DEBUG_JS 的本质区别。
+     * 页面侧对应的接口见 live2d_decor.html 的 window.__mikuLive2D* 暴露表。
+     */
+    private fun applyPageOption(key: String?, on: Boolean) {
+        val v = if (on) 1 else 0
+        when (key) {
+            "cycle" -> evalJsQuiet(
+                "window.__mikuLive2DSetActionCycle && window.__mikuLive2DSetActionCycle($v)")
+            "fx", "snap" -> evalJsQuiet(
+                "window.__mikuLive2DSetOption && window.__mikuLive2DSetOption('$key', $v)")
+            else -> L2DLog.w(L2DLog.Mod.SVC, "未知的页面开关，已忽略", "key=$key")
+        }
+    }
 
     /** 通知页面当前触摸模式，页面据此决定是否渲染交互反馈 */
     private fun pushTouchModeToPage() {

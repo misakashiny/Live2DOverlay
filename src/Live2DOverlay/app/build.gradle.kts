@@ -14,8 +14,8 @@ android {
         applicationId = "com.live2d.overlay"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.7.0"
+        versionCode = 9
+        versionName = "1.7.1"
     }
 
     androidResources {
@@ -48,6 +48,10 @@ android {
 
     buildFeatures {
         viewBinding = true
+        // v1.7.1（迭代清单 P0-4）：ACTION_DEBUG_JS 需要 BuildConfig.DEBUG 做守卫。
+        // AGP 8 起 BuildConfig 默认**不生成**，必须显式打开，否则报
+        // "Unresolved reference 'BuildConfig'"。
+        buildConfig = true
     }
 
     packaging {
