@@ -1,0 +1,31 @@
+# ===========================================================================
+# Live2D 桌面悬浮窗 · 版本控制忽略规则
+# 判据：能重新生成 / 机器相关 / 体积巨大  →  不入库
+# 依据：docs/01_迭代清单.md P0-1、README.md「接手第一件事」
+# ===========================================================================
+
+# ── 归档区（170M，全部为可重新生成的中间产物）─────────────────────────────
+# 含 gradle-build-output / gradle-cache / apk-history / reverse-engineering
+#    / debug-screenshots / temp
+# 注意：其中不可再生的资产已移出到 reference/，故整目录忽略是安全的。
+_archive/
+
+# ── Android 构建产物（assembleDebug 可重新生成）───────────────────────────
+src/Live2DOverlay/app/build/
+src/Live2DOverlay/build/
+src/Live2DOverlay/.gradle/
+src/Live2DOverlay/.kotlin/
+
+# ── 本机环境配置（含 sdk.dir，随机器变化；文件头已注明「不要提交」）─────────
+src/Live2DOverlay/local.properties
+
+# ── IDE / 编辑器 ───────────────────────────────────────────────────────────
+.idea/
+*.iml
+captures/
+*.hprof
+
+# ── 操作系统垃圾文件 ───────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store

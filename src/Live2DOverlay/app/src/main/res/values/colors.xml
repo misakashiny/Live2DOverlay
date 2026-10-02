@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#FF14171A</color>
+    <color name="card_bg">#FF1F2429</color>
+    <color name="accent">#FF6B9BD2</color>
+    <color name="text_primary">#FFECEFF3</color>
+    <color name="text_secondary">#FF9AA5B1</color>
+    <color name="ok_green">#FF4CAF7D</color>
+    <color name="warn_amber">#FFE0A63C</color>
+
+    <!-- 运行日志（v1.3.0）：面板底色与分级配色 -->
+    <color name="log_panel_bg">#FF11151A</color>
+    <color name="log_lv_v">#FF7A8794</color>
+    <color name="log_lv_d">#FFA8B4C0</color>
+    <color name="log_lv_i">#FF6B9BD2</color>
+    <color name="log_lv_w">#FFE0A63C</color>
+    <color name="log_lv_e">#FFE06C5A</color>
+</resources>

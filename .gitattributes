@@ -1,0 +1,27 @@
+# ===========================================================================
+# 行尾策略：禁止 Git 做任何行尾转换
+#
+# 原因：本仓库刻意混合了两种行尾 ——
+#   · assets/live2d/live2d_decor.html  → 纯 LF（2414 行，改造基线是 LF）
+#   · *.kt / *.xml                     → CRLF
+# 若开启 autocrlf，Git 会在提交/检出时静默改写行尾，
+# 使本项目「字节级可复现」的校验习惯（构建产物 MD5 比对、JS 逐段试编译）失效，
+# 并产生整文件级伪 diff。
+# ===========================================================================
+* -text
+
+# 二进制文件：不参与 diff / merge
+*.apk    binary
+*.jar    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.webp   binary
+*.gif    binary
+*.ico    binary
+*.ttf    binary
+*.otf    binary
+*.ogg    binary
+*.so     binary
+*.moc3   binary
+*.zip    binary

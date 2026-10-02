@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Live2D 桌面</string>
+    <string name="notification_channel_name">桌面悬浮渲染</string>
+    <string name="notification_channel_desc">保持 Live2D 模型在桌面上常驻显示</string>
+    <string name="notification_title">Live2D 桌面已启用</string>
+    <string name="notification_text">模型正在桌面显示，点击返回控制台</string>
+</resources>

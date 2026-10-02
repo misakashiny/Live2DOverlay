@@ -1,0 +1,63 @@
+===== Live2D Overlay 运行日志 =====
+导出时间：2026-10-02 03:04:23.469
+缓冲条数：15 / 累计：15
+当前级别：D
+====================================
+
+----- 内存缓冲（最近 15 条）-----
+[03:03:28.081][SVC][I] 日志系统就绪 | level=D buffer=800 retain=3d
+[03:03:39.073][SVC][I] 服务已创建 | touch=true model=miku.model3.json hw=true
+[03:03:39.207][RENDER][I] 开始加载页面 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+[03:03:39.214][SVC][I] 悬浮窗已挂载 | mode=两窗口分离
+[03:03:39.309][JS:RENDER][I] 开始加载模型 | url=file:///sdcard/Live2DModels/miku/miku.model3.json dw=2560 dh=720 quality=2 fps=60 touch=true autoPos=true watermark=隐藏
+[03:03:39.364][JS:RENDER][D] Pixi 运行库已加载 | t=55ms
+[03:03:39.460][RENDER][D] 页面加载完成 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+[03:03:39.472][JS:TOUCH][I] 触摸模式切换 | interactive=true touchManaged=true
+[03:03:39.721][JS:RENDER][I] 模型实例化完成 | 耗时=267ms 总耗时=412ms rawW=3500 rawH=8888
+[03:03:39.723][JS:MOTION][I] 动作运行时已准备 | groups=无 motions=0 expressions=0 defaultIdle=true usingDefault=false
+[03:03:39.725][JS:TOUCH][I] 交互已安装 | enabled=true autoPos=true
+[03:03:39.726][JS:TOUCH][D] 命中区上报 | L=484 T=144 R=654 B=576 vw=1138 vh=664 force=1
+[03:03:39.728][JS:WM][I] 水印压制器已安装 | hideValue=1
+[03:03:39.732][JS:RENDER][I] 加载完成 | 总耗时=422ms scale=0.049 pos=(569,412) bounds=484,144,654,576 水印=已隐藏 触摸=true
+[03:03:39.736][TOUCH][I] 捕获窗口已创建 | x=1076 y=312 w=406 h=995
+
+----- 落盘文件：l2d-2026-10-02.log -----
+2026-10-02 02:59:03.905 [02:59:03.905][SVC][I] 日志系统就绪 | level=D buffer=800 retain=3d
+2026-10-02 03:02:30.627 [03:02:30.627][SVC][I] 服务已创建 | touch=true model=miku.model3.json hw=true
+2026-10-02 03:02:30.850 [03:02:30.850][RENDER][I] 开始加载页面 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+2026-10-02 03:02:30.869 [03:02:30.869][SVC][I] 悬浮窗已挂载 | mode=两窗口分离
+2026-10-02 03:02:30.974 [03:02:30.974][BRIDGE][D] 页面日志(兜底通道) | [03:02:30.974][RENDER][I] 开始加载模型 | url=file:///sdcard/Live2DModels/miku/miku.model3.json dw=2560 dh=720 quality=2 fps=60 touch=true autoPos=true watermark=隐藏
+2026-10-02 03:02:30.976 [03:02:30.976][JS:RENDER][I] 开始加载模型 | url=file:///sdcard/Live2DModels/miku/miku.model3.json dw=2560 dh=720 quality=2 fps=60 touch=true autoPos=true watermark=隐藏
+2026-10-02 03:02:31.018 [03:02:31.018][JS:RENDER][D] Pixi 运行库已加载 | t=45ms
+2026-10-02 03:02:31.018 [03:02:31.018][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.018][RENDER][D] Pixi 运行库已加载 | t=45ms
+2026-10-02 03:02:31.136 [03:02:31.136][RENDER][D] 页面加载完成 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+2026-10-02 03:02:31.145 [03:02:31.145][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.145][TOUCH][I] 触摸模式切换 | interactive=true touchManaged=true
+2026-10-02 03:02:31.145 [03:02:31.145][JS:TOUCH][I] 触摸模式切换 | interactive=true touchManaged=true
+2026-10-02 03:02:31.391 [03:02:31.391][JS:RENDER][I] 模型实例化完成 | 耗时=287ms 总耗时=417ms rawW=3500 rawH=8888
+2026-10-02 03:02:31.391 [03:02:31.391][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.391][RENDER][I] 模型实例化完成 | 耗时=287ms 总耗时=417ms rawW=3500 rawH=8888
+2026-10-02 03:02:31.397 [03:02:31.397][JS:MOTION][I] 动作运行时已准备 | groups=无 motions=0 expressions=0 defaultIdle=true usingDefault=false
+2026-10-02 03:02:31.398 [03:02:31.398][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.396][MOTION][I] 动作运行时已准备 | groups=无 motions=0 expressions=0 defaultIdle=true usingDefault=false
+2026-10-02 03:02:31.402 [03:02:31.402][JS:TOUCH][I] 交互已安装 | enabled=true autoPos=true
+2026-10-02 03:02:31.404 [03:02:31.404][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.402][TOUCH][I] 交互已安装 | enabled=true autoPos=true
+2026-10-02 03:02:31.405 [03:02:31.405][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.404][TOUCH][D] 命中区上报 | L=484 T=144 R=654 B=576 vw=1138 vh=664 force=1
+2026-10-02 03:02:31.405 [03:02:31.405][JS:TOUCH][D] 命中区上报 | L=484 T=144 R=654 B=576 vw=1138 vh=664 force=1
+2026-10-02 03:02:31.406 [03:02:31.406][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.406][WM][I] 水印压制器已安装 | hideValue=1
+2026-10-02 03:02:31.406 [03:02:31.406][JS:WM][I] 水印压制器已安装 | hideValue=1
+2026-10-02 03:02:31.407 [03:02:31.407][BRIDGE][D] 页面日志(兜底通道) | [03:02:31.407][RENDER][I] 加载完成 | 总耗时=434ms scale=0.049 pos=(569,412) bounds=484,144,654,576 水印=已隐藏 触摸=true
+2026-10-02 03:02:31.407 [03:02:31.407][JS:RENDER][I] 加载完成 | 总耗时=434ms scale=0.049 pos=(569,412) bounds=484,144,654,576 水印=已隐藏 触摸=true
+2026-10-02 03:02:31.430 [03:02:31.430][TOUCH][I] 捕获窗口已创建 | x=1076 y=312 w=406 h=995
+2026-10-02 03:03:28.081 [03:03:28.081][SVC][I] 日志系统就绪 | level=D buffer=800 retain=3d
+2026-10-02 03:03:39.073 [03:03:39.073][SVC][I] 服务已创建 | touch=true model=miku.model3.json hw=true
+2026-10-02 03:03:39.207 [03:03:39.207][RENDER][I] 开始加载页面 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+2026-10-02 03:03:39.214 [03:03:39.214][SVC][I] 悬浮窗已挂载 | mode=两窗口分离
+2026-10-02 03:03:39.309 [03:03:39.309][JS:RENDER][I] 开始加载模型 | url=file:///sdcard/Live2DModels/miku/miku.model3.json dw=2560 dh=720 quality=2 fps=60 touch=true autoPos=true watermark=隐藏
+2026-10-02 03:03:39.364 [03:03:39.364][JS:RENDER][D] Pixi 运行库已加载 | t=55ms
+2026-10-02 03:03:39.460 [03:03:39.460][RENDER][D] 页面加载完成 | url=file:///android_asset/live2d/live2d_decor.html?model=file%3A%2F%2F%2Fsdcard%2FLive2DModels%2Fmiku%2Fmiku.model3.json&dw=2560&dh=720&autoPos=1&scale=1.20&quality=2&fps=60&clip=0&clipBottom=546.50&touch=1&watermark=0
+2026-10-02 03:03:39.472 [03:03:39.472][JS:TOUCH][I] 触摸模式切换 | interactive=true touchManaged=true
+2026-10-02 03:03:39.721 [03:03:39.721][JS:RENDER][I] 模型实例化完成 | 耗时=267ms 总耗时=412ms rawW=3500 rawH=8888
+2026-10-02 03:03:39.723 [03:03:39.723][JS:MOTION][I] 动作运行时已准备 | groups=无 motions=0 expressions=0 defaultIdle=true usingDefault=false
+2026-10-02 03:03:39.725 [03:03:39.725][JS:TOUCH][I] 交互已安装 | enabled=true autoPos=true
+2026-10-02 03:03:39.726 [03:03:39.726][JS:TOUCH][D] 命中区上报 | L=484 T=144 R=654 B=576 vw=1138 vh=664 force=1
+2026-10-02 03:03:39.728 [03:03:39.728][JS:WM][I] 水印压制器已安装 | hideValue=1
+2026-10-02 03:03:39.732 [03:03:39.732][JS:RENDER][I] 加载完成 | 总耗时=422ms scale=0.049 pos=(569,412) bounds=484,144,654,576 水印=已隐藏 触摸=true
+2026-10-02 03:03:39.736 [03:03:39.736][TOUCH][I] 捕获窗口已创建 | x=1076 y=312 w=406 h=995

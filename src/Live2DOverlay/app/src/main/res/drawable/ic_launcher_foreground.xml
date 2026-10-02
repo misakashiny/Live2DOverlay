@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 简化的启动图标前景：一个抽象的 Live2D 轮廓 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="0" android:translateY="0">
+        <!-- 头部 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M54,30 m-16,0 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0" />
+        <!-- 身体 -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M38,54 L70,54 L74,84 L34,84 Z" />
+        <!-- 高光眼 -->
+        <path
+            android:fillColor="#FF6B9BD2"
+            android:pathData="M47,27 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+        <path
+            android:fillColor="#FF6B9BD2"
+            android:pathData="M61,27 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    </group>
+</vector>

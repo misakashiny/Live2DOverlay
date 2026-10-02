@@ -1,0 +1,87 @@
+# Live2D 桌面悬浮窗 · 工作区
+
+Android 应用：在桌面上叠加 Live2D 模型，模型内可交互、模型外触摸完全穿透。
+
+**当前版本 `v1.5.0`**（`versionCode 6`）｜包名 `com.live2d.overlay`｜验证机型：小米平板 / Android 15
+
+---
+
+## 从哪读起
+
+| 你的目的 | 读这个 |
+|---|---|
+| **刚接手，想知道全貌** | [`docs/00_交接总纲.md`](docs/00_交接总纲.md) ★ 环境、架构、约束、验证方法 |
+| **想知道还剩什么没做** | [`docs/01_迭代清单.md`](docs/01_迭代清单.md) ★ 待办按优先级排序，含落点与验收方式 |
+| **想改代码，找函数** | [`docs/02_源码导读.md`](docs/02_源码导读.md) ★ 逐文件逐函数索引 + 「改 X 动哪里」速查 |
+| **查历史变更 / 某个 Bug 的根因** | [`docs/10_迭代大纲（历史全记录）.md`](docs/10_迭代大纲（历史全记录）.md) 15 个 Bug 档案 |
+| **只是想编译安装跑起来** | [`docs/20_工程说明.md`](docs/20_工程说明.md) |
+| **下一阶段 AI 角色系统怎么做** | [`docs/30_AI角色系统_架构推演.md`](docs/30_AI角色系统_架构推演.md) |
+
+> ⚠️ **动手前必读**：交接总纲 **§三 环境事实** 与 **§五 五条不可违背的架构约束**。
+> 那五条对应的都是「改完能编译、装机才炸」的坑。
+
+---
+
+## 目录结构
+
+```
+.
+├── README.md                    ← 本文件
+├── docs/                        文档（8 份）
+├── src/Live2DOverlay/           ★ Android 工程源码，可直接构建
+├── artifacts/                   当前版本 APK
+├── reference/
+│   ├── live2d_decor.original.html   MikuCarLauncher 原始页面（改造基线，995 行）
+│   └── tools/                       自写逆向脚本
+├── evidence/                    验收证据（截图、导出日志样例）
+├── _archive/                    归档区（171M，不参与构建，**可整目录删除**）
+└── .workbuddy-ai/memory/        工作日历
+```
+
+---
+
+## 快速构建
+
+```bash
+cd src/Live2DOverlay
+export JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
+export ANDROID_HOME='C:\Android\Sdk'
+./gradlew assembleDebug --console=plain
+```
+
+> 环境变量**必须显式注入**（会话进程里读不到）；**不要加 `--offline`**；构建须**前台**执行。
+> 完整装机与授权命令见 [`docs/00_交接总纲.md`](docs/00_交接总纲.md) §3.3。
+
+---
+
+## 接手第一件事
+
+工作区**尚无 git 仓库**，改动不可回退。建议先：
+
+```bash
+git init
+printf 'src/Live2DOverlay/app/build/\nsrc/Live2DOverlay/.gradle/\nsrc/Live2DOverlay/local.properties\n_archive/\n' > .gitignore
+git add -A && git commit -m "chore: 接手 v1.5.0 基线"
+```
+
+随后从 [`docs/01_迭代清单.md`](docs/01_迭代清单.md) §二 的 **P0 阻塞项**开始。
+
+---
+
+## 归档区说明
+
+`_archive/` 共 172M，全部为**可重新生成的中间产物**：
+
+| 子目录 | 内容 | 可否删除 |
+|---|---|---|
+| `gradle-build-output/` | `app/build/`（30M） | ✅ `assembleDebug` 可重新生成 |
+| `gradle-cache/` | `.gradle/`（3.1M） | ✅ 首次构建自动重建 |
+| `apk-history/` | 历史 APK v1.0.0 ~ v1.4.0（29M） | ⚠️ 删后不可回退（当前无 git） |
+| `reverse-engineering/` | 逆向解包产物，含原始 `miku.apk` / `qz.apk`（66M） | ⚠️ 结论已入档 `docs/40_*`，原始 APK 可从设备重新拉取 |
+| `debug-screenshots/` | 各版本调试截图（27M） | ✅ |
+| `temp/` | 临时校验脚本、根目录 `stage/`（18M） | ✅ |
+
+**其中已抢救出的不可再生资产**（已移出归档区，勿删）：
+
+- `reference/live2d_decor.original.html` —— MikuCarLauncher 原始页面，本项目改造基线
+- `reference/tools/` —— 自写逆向脚本（`dexparse.py` / `rawzip.py` / `strdump.py`）

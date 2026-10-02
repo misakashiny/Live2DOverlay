@@ -1,0 +1,2414 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      pointer-events: none;
+      -webkit-user-select: none;
+      user-select: none;
+      /* 触摸交互：禁止浏览器的滚动/缩放/双击放大默认行为，
+         否则手指按住模型拖动会变成页面拖拽，模型收不到连续 move 事件 */
+      touch-action: none;
+      -webkit-touch-callout: none;
+    }
+    #stage {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      pointer-events: none;
+    }
+    #msg {
+      position: fixed;
+      left: 8px;
+      top: 8px;
+      right: 8px;
+      color: rgba(255,255,255,.88);
+      background: rgba(0,0,0,.34);
+      font: 12px sans-serif;
+      padding: 6px 8px;
+      border-radius: 8px;
+      display: none;
+      pointer-events: none;
+    }
+    canvas {
+      background: transparent !important;
+      pointer-events: none;
+    }
+    /* 可交互模式下整页接收指针事件。
+       安全性说明：触摸范围已由 Android 侧的「捕获窗口」限制在模型包围盒内，
+       页面本身即使全屏可点，桌面也收不到这些事件——模型之外的触摸
+       根本不会进入本窗口。因此这里放开 pointer-events 不会影响桌面。 */
+    body.interactive,
+    body.interactive #stage,
+    body.interactive canvas {
+      pointer-events: auto;
+    }
+
+    /* ===== v1.5.0：点击特效层 =====
+       独立的 fixed 全屏容器，pointer-events:none 保证它不抢触摸。
+       特效用 DOM + CSS 动画而非绘制到 canvas，原因：
+       特效与模型渲染解耦，不会污染 WebGL 帧缓冲（v1.2.0 Bug-001 的教训），
+       也不需要每帧参与渲染循环。 */
+    #fx {
+      position: fixed;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 20;
+    }
+    .fx-ripple {
+      position: absolute;
+      width: 12px; height: 12px;
+      margin: -6px 0 0 -6px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, .85);
+      box-shadow: 0 0 10px rgba(120, 190, 255, .7);
+      animation: fx-ripple-anim 520ms cubic-bezier(.2, .7, .3, 1) forwards;
+    }
+    @keyframes fx-ripple-anim {
+      from { transform: scale(1);   opacity: .9; }
+      to   { transform: scale(9);   opacity: 0;  }
+    }
+    .fx-spark {
+      position: absolute;
+      width: 7px; height: 7px;
+      margin: -3.5px 0 0 -3.5px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #fff 0%, rgba(160, 220, 255, .9) 45%, rgba(160, 220, 255, 0) 70%);
+      animation: fx-spark-anim 620ms ease-out forwards;
+    }
+    @keyframes fx-spark-anim {
+      from { transform: translate(0, 0) scale(1); opacity: 1; }
+      to   { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="msg"></div>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const modelUrl = params.get("model") || "";
+  const designW = parseFloat(params.get("dw") || "2560") || 2560;
+  const designH = parseFloat(params.get("dh") || "720") || 720;
+  const shouldClipLive2D = params.get("clip") !== "0";
+  // v62：画质倍率和帧率可在设置中调节。
+  // 画质倍率 1.0 = 当前稳定默认，2.0 = 更清晰但更吃性能。
+  const renderQuality = Math.max(0.5, Math.min(2.0, parseFloat(params.get("quality") || "1.0") || 1.0));
+  const targetFps = Math.max(15, Math.min(60, parseInt(params.get("fps") || "60", 10) || 60));
+  const isNightMode = params.get("night") === "1";
+  const nightDimAlpha = Math.max(0, Math.min(85, parseFloat(params.get("dim") || "35") || 0));
+  // v63：触摸交互总开关。由 Android 侧通过 __mikuLive2DSetInteractive() 动态调整。
+  let interactiveEnabled = params.get("touch") !== "0";
+
+  // v1.2.0（R6）：水印开关。
+  // 模型自带的「水印」是参数 Param137（Add 混合），模型姿态每帧会把它设回 1，
+  // 因此必须在每帧末尾强制压回 0。watermark=1 时才显示。
+  const watermarkVisible = params.get("watermark") === "1";
+
+  // v1.2.0 诊断开关：为 false 时暂停每帧压制，便于验证 Param137 的真实语义。
+  // 定位完成后将恢复为 true。
+  const WATERMARK_SUPPRESS_ENABLED = true;
+
+  /**
+   * v1.2.0（R6）★ 关键逆向结论（经真机实验证实）：
+   *
+   * 本模型的「水印」参数 Param137 是**反向语义** ——
+   *
+   *     Param137 = 1  →  水印被隐藏（模型干净）
+   *     Param137 = 0  →  水印显示（默认状态）
+   *
+   * 依据：
+   *   1. 真机审计显示，模型加载后 Param137 默认就是 0，此时水印可见；
+   *   2. 手动把它置为 1 后，水印立刻消失（已截图存档）。
+   *
+   * 「水印.exp3.json」的内容（Param137 = 1.0, Add 混合）因此实际是一个
+   * 「隐藏水印」的表情。VTube Studio 里所谓的「小键盘1」就是 VTS 给这个
+   * 表情绑定的热键（见 miku.vtube.json 的 Hotkeys[8]：Name=水印），
+   * 在本 App 中无法读取 VTS 热键，只能由我们自己设定该参数。
+   */
+  const WATERMARK_HIDDEN_VALUE = 1.0;
+
+  let centerX = parseFloat(params.get("cx") || "1448") || 1448;
+  let centerY = parseFloat(params.get("cy") || "420") || 420;
+  let userScale = parseFloat(params.get("scale") || "1") || 1;
+
+  const msg = document.getElementById("msg");
+  let app = null;
+  let model = null;
+  let rawModelWidth = 1;
+  let rawModelHeight = 1;
+  let motionGroups = [];
+  let motionList = [];
+  let expressionList = [];
+  let motionTimer = null;
+  let nextMotionIndex = 0;
+  let isMotionPlaying = false;
+  let motionRuntimePrepared = false;
+  let initialMotionStarted = false;
+
+  // v0.11.5：遮罩下边界可在 Live2D 调整页拖动设置。
+  let live2DClipBottomDesignY = Math.max(0, Math.min(designH,
+      parseFloat(params.get("clipBottom") || "546.5") || 546.5));
+  let live2DMask = null;
+
+  // v1.2.0：触摸交互状态机（语义已按用户要求调整）。
+  //
+  // 手势分工：
+  //   · 短按（< LONG_PRESS_MS，且位移未超阈值）→ 触发模型自带动作/表情
+  //   · 长按（按住 LONG_PRESS_MS 不动）→ 进入拖拽模式，此后跟手移动
+  //                                    直到松手，期间不再触发动作
+  //
+  // 之所以要「等长按才拖」，是为了避免「想点一下看看动作，结果把模型挪跑了」。
+  const TAP_MOVE_TOLERANCE = 14;   // 触发拖动前的位移阈值（CSS px）
+  const LONG_PRESS_MS = 400;       // 长按进入拖拽的判定时长（ms）
+
+  let pointerActive = false;       // 当前是否有手指按下
+  let pointerStartX = 0;
+  let pointerStartY = 0;
+  let pointerLastX = 0;
+  let pointerLastY = 0;
+  let pointerDownAt = 0;
+  let dragging = false;            // 是否已升级为拖拽
+  let dragArmed = false;           // 长按已解锁，等待手指移动即开始拖拽
+  let longPressTimer = null;
+  let pointerMoved = false;
+  // v1.2.0：手动定位过模型后置 true。
+  // 一旦为 true，待机逻辑不再用 centerX/centerY 覆写 model.x/y（修复 R2）。
+  let manualPositioned = false;
+
+  // v1.2.0：触摸模式接管坐标。
+  // 由 Android 侧通过 __mikuLive2DSetInteractive 同步；为 true 时
+  // 模型位置完全由拖拽决定，URL 里的 cx/cy 不再参与定位。
+  let touchManaged = false;
+
+  // v1.2.0：自动定位模式（URL 带 autoPos=1，或 touch=1）。
+  // 为 true 时 applyLayout / updateDefaultIdle 都不再用 centerX/centerY 覆写位置，
+  // 模型初始落点取「屏幕水平居中、垂直 62%」这一视觉舒适位，之后完全由用户拖拽决定。
+  const autoPositionMode = params.get("autoPos") === "1" || params.get("touch") !== "0";
+
+  // v1.5.0：短按动作「按顺序轮播」模式（URL 带 cycle=1）。
+  // 默认（0）是随机抽取，调试时想逐个验证动作则开启轮播。
+  // 该值可由 Android 侧通过 __mikuLive2DSetActionCycle 运行时切换。
+  let actionCycleMode = params.get("cycle") === "1";
+  let actionCycleIndex = -1;
+
+  // v1.5.0：点击特效开关（URL 带 fx=0 关闭）
+  // 注意用 let 而非 const：Android 侧可运行时热切换，无需重载页面。
+  let tapEffectEnabled = params.get("fx") !== "0";
+
+  // v1.5.0：边缘吸附（URL 带 snap=0 关闭）
+  let edgeSnapEnabled = params.get("snap") !== "0";
+
+  // v1.5.0：「抓住」脉冲反馈的时间窗口（秒）
+  let grabPulseStartSec = -1;
+  let grabPulseUntilSec = -1;
+  // v1.5.0：当前缩放基准（由 applyLayout 写入，供脉冲叠加使用）
+  let currentBaseScale = 1;
+
+  /**
+   * v1.5.0：应用「抓住」脉冲。
+   *
+   * 在 ticker 里每帧调用，按时间窗口计算一个脉冲系数叠加到缩放基准上：
+   *   0~40%  快速放大到 1.06
+   *   40~100% 平滑回落到 1.0
+   * 结束时刻精确还原为基准值，避免残留导致模型被永久放大。
+   */
+  function applyGrabPulse() {
+    if (!model) return;
+
+    if (grabPulseUntilSec < 0) return;
+
+    const now = elapsedSec;
+    if (now >= grabPulseUntilSec) {
+      // 脉冲结束：精确还原
+      model.scale.set(currentBaseScale);
+      grabPulseStartSec = -1;
+      grabPulseUntilSec = -1;
+      return;
+    }
+
+    const dur = grabPulseUntilSec - grabPulseStartSec;
+    const p = dur > 0 ? clamp((now - grabPulseStartSec) / dur, 0, 1) : 1;
+    // 前 40% 上升，后 60% 回落
+    const amp = p < 0.4
+      ? (p / 0.4)
+      : (1 - (p - 0.4) / 0.6);
+    model.scale.set(currentBaseScale * (1 + 0.06 * amp));
+  }
+
+  // ------------------------------------------------------------------
+  // v1.5.0：边缘吸附 / 回弹
+  // ------------------------------------------------------------------
+
+  /** 吸附动画状态 */
+  let edgeSnap = null;   // { fromX, toX, fromY, toY, startSec, durSec }
+
+  /** 吸附触发阈值：距边缘小于该比例的宽度时触发 */
+  const EDGE_SNAP_RATIO = 0.14;
+  /** 吸附后距边缘的留白（相对模型宽度） */
+  const EDGE_SNAP_MARGIN = 0.02;
+
+  /**
+   * 松手后判断是否需要吸附到左/右边缘，并启动补间动画。
+   *
+   * 设计取舍：只吸附**水平**方向，不吸附垂直。
+   * 桌面宠物的常规停靠位置是屏幕两侧，垂直方向用户通常希望自由摆放；
+   * 若垂直也吸附，会把模型强制挤到顶部或底部，反而违背直觉。
+   */
+  function startEdgeSnap() {
+    const b = computeModelBounds();
+    if (!b || !model) return;
+
+    const w = b.r - b.l;
+    const vw = window.innerWidth;
+    const threshold = vw * EDGE_SNAP_RATIO + w * 0.5;
+    const margin = w * EDGE_SNAP_MARGIN;
+
+    let toX = null;
+    if (model.x < threshold) {
+      toX = margin;                    // 吸附到左
+    } else if (model.x > vw - threshold) {
+      toX = vw - margin;               // 吸附到右
+    }
+
+    if (toX === null) return;
+
+    const dist = Math.abs(toX - model.x);
+    if (dist < 1) return;   // 已经在位，不启动动画
+
+    edgeSnap = {
+      fromX: model.x,
+      toX: toX,
+      startSec: elapsedSec,
+      // 距离越远动画越长，但设上下限，避免长距离拖沓 / 短距离生硬
+      durSec: clamp(dist / 900, 0.16, 0.42)
+    };
+    LOG.i(M.TOUCH, "边缘吸附启动",
+      "from=" + Math.round(model.x) + " to=" + Math.round(toX) +
+      " dur=" + Math.round(edgeSnap.durSec * 1000) + "ms");
+  }
+
+  /**
+   * 每帧推进吸附动画。
+   * 用 easeOutCubic 缓出：起步快、收尾慢，观感像「被轻轻吸过去」。
+   */
+  function updateEdgeSnap() {
+    if (!edgeSnap || !model) return;
+
+    const p = clamp((elapsedSec - edgeSnap.startSec) / edgeSnap.durSec, 0, 1);
+    const e = 1 - Math.pow(1 - p, 3);
+    model.x = edgeSnap.fromX + (edgeSnap.toX - edgeSnap.fromX) * e;
+
+    if (p >= 1) {
+      model.x = edgeSnap.toX;
+      LOG.d(M.TOUCH, "边缘吸附完成", "x=" + Math.round(model.x));
+      edgeSnap = null;
+      // 吸附会改变最终位置，需要重新上报并持久化
+      persistModelPosition();
+      reportHitArea(true);
+    }
+  }
+
+  /** 拖拽/新触摸开始时取消进行中的吸附，避免与手指抢夺位置控制权 */
+  function cancelEdgeSnap() {
+    if (edgeSnap) {
+      LOG.d(M.TOUCH, "边缘吸附已取消");
+      edgeSnap = null;
+    }
+  }
+  let modelCenterXDesign = 0;      // 拖拽期间维护的设计坐标
+  let modelCenterYDesign = 0;
+  // 视线跟随的平滑目标（-1 ~ 1 归一化）
+  let gazeTargetX = 0;
+  let gazeTargetY = 0;
+  let gazeCurrentX = 0;
+  let gazeCurrentY = 0;
+  // 包围盒上报节流
+  let lastHitReportAt = 0;
+  let lastHitReportKey = "";
+
+  // v56：默认待机效果不再用整体缩放/漂浮，而是尽量模拟 ViewerEX 那种参数级待机：
+  // 眼睛随机眨眼、头部轻微看向、身体小幅摆动；只在模型无自带动作/使用注入默认动作时启用。
+  let elapsedSec = 0;
+  let nextBlinkSec = 1.2 + Math.random() * 2.5;
+  let blinkStartSec = -1;
+  let defaultIdleEnabled = false;
+  let usingDefaultMotions = false;
+  let defaultActionKind = "";
+  let defaultActionStartSec = -1;
+  let defaultActionDurationSec = 0;
+
+  // ==================================================================
+  // v1.3.0：统一日志核心（JS 侧）
+  // ==================================================================
+  //
+  // 与 Kotlin 侧 L2DLog 保持完全一致的格式与级别，这样两端的日志可以
+  // 混在同一个视图里按模块过滤：
+  //
+  //     [HH:mm:ss.SSS][MODULE][LEVEL] message | k=v k=v
+  //
+  // 输出通道（三路并行，任一失败都不影响业务）：
+  //   1. console.log  → 由 WebChromeClient.onConsoleMessage 转发到 logcat；
+  //   2. 内存环形缓冲 → 供 __mikuLive2DDumpLogs() 一次性导出；
+  //   3. Android 桥   → 若宿主实现了 log() 接口，直接上报给 L2DLog。
+  const LOG = (function() {
+    const MAX = 400;
+    const LEVELS = { V: 0, D: 1, I: 2, W: 3, E: 4 };
+    const buf = [];
+    let minLevel = LEVELS[params.get("loglevel") || "1"] ?? LEVELS.D;
+    let enabled = params.get("log") !== "0";
+
+    function ts() {
+      const d = new Date();
+      return String(d.getHours()).padStart(2, "0") + ":" +
+             String(d.getMinutes()).padStart(2, "0") + ":" +
+             String(d.getSeconds()).padStart(2, "0") + "." +
+             String(d.getMilliseconds()).padStart(3, "0");
+    }
+
+    function write(level, module, message, extras) {
+      if (!enabled) return;
+      if (LEVELS[level] < minLevel) return;
+
+      const extraStr = extras ? " | " + extras : "";
+      const line = "[" + ts() + "][" + module + "][" + level + "] " + message + extraStr;
+
+      // 内存环形缓冲
+      try {
+        buf.push(line);
+        if (buf.length > MAX) buf.splice(0, buf.length - MAX);
+      } catch (e) {}
+
+      // 通道选择：优先直连宿主桥（结构化字段，无字符串解析开销）；
+      // 仅在桥不可用（如纯浏览器调试）时才回退 console 转发。
+      // 两者必须二选一 —— 同时走会导致同一事件被记录两次。
+      let bridged = false;
+      try {
+        const b = window.MikuLive2DAndroid;
+        if (b && typeof b.log === "function") {
+          b.log(level, module, message, extras || "");
+          bridged = true;
+        }
+      } catch (e) {}
+
+      if (!bridged) {
+        try {
+          console.log("L2D" + line);
+        } catch (e) {}
+      }
+    }
+
+    return {
+      v: function(m, msg, ex) { write("V", m, msg, ex); },
+      d: function(m, msg, ex) { write("D", m, msg, ex); },
+      i: function(m, msg, ex) { write("I", m, msg, ex); },
+      w: function(m, msg, ex) { write("W", m, msg, ex); },
+      e: function(m, msg, ex) { write("E", m, msg, ex); },
+      snapshot: function() { return buf.slice(); },
+      clear: function() { buf.length = 0; },
+      setLevel: function(tag) {
+        const v = LEVELS[String(tag || "").toUpperCase()];
+        if (v !== undefined) { minLevel = v; }
+        return minLevel;
+      },
+      setEnabled: function(on) { enabled = !!on; return enabled; },
+      info: function() {
+        return "条目=" + buf.length + "/" + MAX + " 级别=" +
+               Object.keys(LEVELS).find(function(k) { return LEVELS[k] === minLevel; });
+      }
+    };
+  })();
+
+  // 模块常量。与 Kotlin L2DLog.Mod 一一对应，便于两端混排。
+  const M = {
+    SVC: "SVC", CFG: "CFG", BRIDGE: "BRIDGE", UI: "UI",
+    RENDER: "RENDER", TOUCH: "TOUCH", MOTION: "MOTION",
+    PARAM: "PARAM", WM: "WM", FX: "FX"
+  };
+
+  // ==================================================================
+  // v1.5.0：点击特效层
+  // ==================================================================
+  //
+  // 用独立 DOM 层而非 canvas 绘制，避免污染 WebGL 帧缓冲
+  // （v1.2.0 Bug-001「点击闪色」正是读取帧缓冲导致的）。
+  const FX = (function() {
+    let layer = null;
+
+    function ensureLayer() {
+      if (layer && layer.parentNode) return layer;
+      layer = document.getElementById("fx");
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.id = "fx";
+        document.body.appendChild(layer);
+      }
+      return layer;
+    }
+
+    /** 涟漪：以点击点为圆心扩散一圈 */
+    function ripple(x, y) {
+      const root = ensureLayer();
+      const el = document.createElement("div");
+      el.className = "fx-ripple";
+      el.style.left = x + "px";
+      el.style.top = y + "px";
+      root.appendChild(el);
+      // 动画结束后移除，避免 DOM 无限增长
+      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 600);
+    }
+
+    /**
+     * 星光：若干粒子从点击点向外飞散。
+     * 用 CSS 变量 --dx/--dy 传递每个粒子的随机方向，
+     * 这样只需一个 keyframes 就能驱动所有粒子。
+     */
+    function sparkle(x, y, count) {
+      const root = ensureLayer();
+      const n = count || 6;
+      const base = Math.random() * Math.PI * 2;
+      for (let i = 0; i < n; i++) {
+        const el = document.createElement("div");
+        el.className = "fx-spark";
+        el.style.left = x + "px";
+        el.style.top = y + "px";
+        const ang = base + (i / n) * Math.PI * 2;
+        const dist = 26 + Math.random() * 22;
+        el.style.setProperty("--dx", (Math.cos(ang) * dist).toFixed(1) + "px");
+        el.style.setProperty("--dy", (Math.sin(ang) * dist).toFixed(1) + "px");
+        // 错开一点起始时间，观感更自然
+        el.style.animationDelay = (i * 18) + "ms";
+        root.appendChild(el);
+        (function(node) {
+          setTimeout(function() { if (node.parentNode) node.parentNode.removeChild(node); }, 760);
+        })(el);
+      }
+    }
+
+    /** 一次完整点击反馈：涟漪 + 星光 */
+    function tap(x, y) {
+      if (!tapEffectEnabled) return;
+      try {
+        ripple(x, y);
+        sparkle(x, y, 6);
+        LOG.d(M.FX, "点击特效已播放", "x=" + Math.round(x) + " y=" + Math.round(y));
+      } catch (e) {
+        LOG.w(M.FX, "点击特效播放失败", "err=" + (e && e.message));
+      }
+    }
+
+    return { tap: tap, ripple: ripple, sparkle: sparkle };
+  })();
+
+  function showMsg(text) {
+    LOG.e(M.RENDER, "加载失败提示", "text=" + text);
+    msg.textContent = text;
+    msg.style.display = "block";
+  }
+
+  function hideMsg() {
+    msg.style.display = "none";
+  }
+
+  function loadScript(src) {
+    return new Promise(function(resolve, reject) {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function() { reject(new Error("load script failed: " + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function loadScriptAny(list) {
+    let last = null;
+    for (const src of list) {
+      try {
+        await loadScript(src);
+        return src;
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last || new Error("script load failed");
+  }
+
+  function stageScaleX() {
+    return window.innerWidth / designW;
+  }
+
+  function stageScaleY() {
+    return window.innerHeight / designH;
+  }
+
+  function targetModelHeightPx() {
+    return 390 * stageScaleY() * userScale;
+  }
+
+  function applyLayout() {
+    if (!model) return;
+
+    const targetHeight = targetModelHeightPx();
+    let baseScale = targetHeight / Math.max(1, rawModelHeight);
+
+    if (!isFinite(baseScale) || baseScale <= 0) {
+      baseScale = 1;
+    }
+
+    // v1.5.0：把缩放基准记到模块级，供「抓住」脉冲复用。
+    // 脉冲必须基于基准值叠加，不能直接乘当前 scale，否则会逐级累积放大。
+    currentBaseScale = baseScale;
+    model.scale.set(baseScale);
+
+    // v1.2.0（R2）：自动定位模式 / 已手动定位过 → 不使用 centerX/centerY 覆写，
+    // 只应用缩放，保留模型当前所在位置。
+    if (autoPositionMode || manualPositioned) {
+      return;
+    }
+
+    model.x = centerX * stageScaleX();
+    model.y = centerY * stageScaleY();
+  }
+
+  // ==================================================================
+  // v63：触摸交互——包围盒上报 / 命中判定 / 视线跟随 / 拖拽
+  // ==================================================================
+
+  /**
+   * 计算模型在当前屏幕上的包围盒（CSS px）。
+   *
+   * 用模型的真实绘制范围（getBounds）而非容器尺寸，因为 Live2D 模型在
+   * 画布里通常只占中间一小块，四周是透明留白。用容器尺寸会让触摸热区过大，
+   * 桌面被大片吃掉的触摸感会很差。
+   *
+   * 同时把「模型局部不透明像素范围」通过 localBounds 转成屏幕坐标，
+   * 进一步收紧到真正有内容的部分。
+   */
+  function computeModelBounds() {
+    if (!model || !app) return null;
+
+    try {
+      const b = model.getBounds();
+      if (b && isFinite(b.x) && isFinite(b.y) && b.width > 0 && b.height > 0) {
+        return {
+          l: b.x,
+          t: b.y,
+          r: b.x + b.width,
+          b: b.y + b.height
+        };
+      }
+    } catch (e) {}
+
+    // 退化路径：用容器尺寸估算
+    try {
+      const s = model.scale.x || 1;
+      const w = (model.width || rawModelWidth) * s;
+      const h = (model.height || rawModelHeight) * s;
+      const ax = (model.anchor && model.anchor.x) || 0.5;
+      const ay = (model.anchor && model.anchor.y) || 0.5;
+      return {
+        l: model.x - w * ax,
+        t: model.y - h * ay,
+        r: model.x + w * (1 - ax),
+        b: model.y + h * (1 - ay)
+      };
+    } catch (e) {}
+
+    return null;
+  }
+
+  /**
+   * 把包围盒上报给 Android。
+   *
+   * 节流策略：至少间隔 200ms，或包围盒变化超过 4px 才上报。
+   * 拖拽时会连续变化，但这个频率足够让 Android 侧的命中判定跟上手指，
+   * 又不会因为每次 move 都跨进程调用而造成卡顿。
+   */
+  function reportHitArea(force) {
+    const b = computeModelBounds();
+    const bridge = window.MikuLive2DAndroid;
+
+    if (!b) {
+      if (force || lastHitReportKey !== "none") {
+        lastHitReportKey = "none";
+        try {
+          if (bridge && bridge.setHitArea) {
+            bridge.setHitArea(JSON.stringify({
+              l: 0, t: 0, r: 0, b: 0, v: false
+            }));
+          }
+        } catch (e) {}
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const key = Math.round(b.l) + "," + Math.round(b.t) + "," +
+                Math.round(b.r) + "," + Math.round(b.b);
+    if (!force) {
+      if (key === lastHitReportKey) return;
+      if (now - lastHitReportAt < 200) return;
+    }
+    lastHitReportAt = now;
+    lastHitReportKey = key;
+
+    try {
+      LOG.d(M.TOUCH, "命中区上报",
+        "L=" + Math.round(b.l) + " T=" + Math.round(b.t) +
+        " R=" + Math.round(b.r) + " B=" + Math.round(b.b) +
+        " vw=" + window.innerWidth + " vh=" + window.innerHeight +
+        (force ? " force=1" : ""));
+    } catch (e) {}
+
+    try {
+      if (bridge && bridge.setHitArea) {
+        bridge.setHitArea(JSON.stringify({
+          l: b.l, t: b.t, r: b.r, b: b.b, v: true,
+          manual: manualPositioned,
+          // viewport 一并上报：Android 侧需要它把 View 像素换算成 CSS 像素
+          vw: window.innerWidth, vh: window.innerHeight
+        }));
+      }
+    } catch (e) {}
+  }
+
+  /** 把拖拽后的模型位置（CSS 坐标）换算回设计坐标并持久化 */
+  function persistModelPosition() {
+    try {
+      const bridge = window.MikuLive2DAndroid;
+      if (bridge && bridge.setModelPos) {
+        modelCenterXDesign = model.x / stageScaleX();
+        modelCenterYDesign = model.y / stageScaleY();
+        bridge.setModelPos(
+          String(Math.round(modelCenterXDesign)),
+          String(Math.round(modelCenterYDesign))
+        );
+      }
+    } catch (e) {}
+  }
+
+  /** 把屏幕坐标归一化为视线偏移（-1 ~ 1），供 updateDefaultIdle 消费 */
+  function updateGazeFromPointer(screenX, screenY) {
+    if (!model) return;
+    const dx = screenX - model.x;
+    const dy = screenY - model.y;
+    const halfW = Math.max(80, window.innerWidth * 0.28);
+    const halfH = Math.max(80, window.innerHeight * 0.28);
+    gazeTargetX = clamp(dx / halfW, -1, 1);
+    gazeTargetY = clamp(dy / halfH, -1, 1);
+  }
+
+  /**
+   * 点在模型上？——用于把点击热区从矩形收紧到轮廓。
+   *
+   * v1.2.0 重写（修复 R1「点击闪色」）：
+   *
+   * 旧实现调用 `app.renderer.render(stage, viewport)` 把整个舞台渲染一遍，
+   * 再用 drawImage 抓主视图采样 alpha。问题在于 Pixi 的 renderer.render 会直接
+   * 改写主画布的当前帧缓冲 —— 恢复 stage.x/y 也救不回来，结果就是用户每次按下
+   * 屏幕都能看到模型「闪一下」异常画面。
+   *
+   * 新实现完全不用 GPU：直接读 miku 模型导出时写入的「不透明像素包围盒」
+   * （localBounds 视角下的 tight bounds，由 model.getBounds() 提供），
+   * 在鼠标/手指落点做纯几何判定。判定精度足以满足「点在模型身上才响应」，
+   * 且零渲染副作用、微秒级耗时。
+   *
+   * 几何判定分两级：
+   *   1. 粗筛：落点是否在模型包围盒内（否则直接判定为「非模型区」）；
+   *   2. 细筛：把落点从屏幕坐标反变换回模型局部坐标，判断是否落在
+   *      模型局部不透明矩形内（进一步排除包围盒四角的大片透明留白）。
+   */
+  function isOpaqueAt(screenX, screenY) {
+    if (!model || !app) return true;
+
+    try {
+      const bounds = computeModelBounds();
+      if (!bounds) return true;
+
+      // 一级：屏幕包围盒粗筛，外扩一点容差（手指接触面积大）
+      const PAD = 6;
+      if (screenX < bounds.l - PAD || screenX > bounds.r + PAD ||
+          screenY < bounds.t - PAD || screenY > bounds.b + PAD) {
+        return false;
+      }
+
+      // 二级：反变换到模型局部坐标，用局部不透明范围进一步收紧。
+      // 模型用的是统一缩放 + 平移 + 轻微旋转（rotation 极小），
+      // 这里忽略旋转误差在 ±6px 内，不影响手感。
+      const lb = getModelLocalOpaqueBounds();
+      if (!lb) return true;
+
+      const sx = model.scale.x || 1;
+      const sy = model.scale.y || 1;
+      const localX = (screenX - model.x) / sx;
+      const localY = (screenY - model.y) / sy;
+
+      return localX >= lb.left - 8 && localX <= lb.right + 8 &&
+             localY >= lb.top - 8 && localY <= lb.bottom + 8;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  /**
+   * 取模型「局部坐标系」下的不透明内容范围。
+   *
+   * pixi-live2d-display 在加载后会把 moc3 的 canvas 尺寸写入
+   * internalModel.originalWidth/Height，并可通过 getBounds() 反推。
+   * 这里优先用 localBounds（Pixi Container 的标准属性，代表
+   * 子节点在自身坐标系下的合成范围），退化时用 canvas 尺寸估算。
+   */
+  function getModelLocalOpaqueBounds() {
+    if (!model) return null;
+
+    try {
+      if (model.internalModel) {
+        const im = model.internalModel;
+        const w = im.originalWidth || (im.coreModel && im.coreModel.getCanvasWidth && im.coreModel.getCanvasWidth());
+        const h = im.originalHeight || (im.coreModel && im.coreModel.getCanvasHeight && im.coreModel.getCanvasHeight());
+        if (w > 0 && h > 0) {
+          // 模型原点在 canvas 中心，anchor 已设为 (0.5, 0.62)。
+          // 转换到「以 model.x/y 为原点」的局部坐标。
+          const anchorX = model.anchor ? model.anchor.x : 0.5;
+          const anchorY = model.anchor ? model.anchor.y : 0.5;
+          return {
+            left: -w * anchorX,
+            right: w * (1 - anchorX),
+            top: -h * anchorY,
+            bottom: h * (1 - anchorY)
+          };
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const lb = model.localBounds;
+      if (lb && isFinite(lb.x) && isFinite(lb.y) && lb.width > 0 && lb.height > 0) {
+        return {
+          left: lb.x, right: lb.x + lb.width,
+          top: lb.y, bottom: lb.y + lb.height
+        };
+      }
+    } catch (e) {}
+
+    return null;
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  // ==================================================================
+  // v1.2.0：模型自带动作库（参数驱动）
+  // ==================================================================
+  //
+  // 逆向结论：本模型（miku）的 model3.json **没有 Motions / Expressions 段**，
+  // 所有动作与表情都由 moc3 内部参数直接驱动。表情文件（*.exp3.json）只是
+  // 一份「参数 → 值」的映射表，内容等价于在运行时 setParam。
+  //
+  // 下面把这 8 个自带动作从 exp3 文件里原样搬进页面，做成可以随机的动作库。
+  //   hold 字段：动作结束后需要保持的值（不写则自动回到收敛态的 0）
+  //   ms   ：动作持续时长
+  const MODEL_ACTIONS = [
+    {
+      name: "拿葱",
+      ms: 2600,
+      apply: function() {
+        setParam("Param133", 1.0);   // 拿葱
+        setParam("Param134", 0.0);
+        setParam("Param135", 0.0);
+      },
+      clear: function() {
+        setParam("Param133", 0.0);
+      }
+    },
+    {
+      name: "唱歌",
+      ms: 2600,
+      apply: function() {
+        setParam("Param134", 1.0);   // 唱歌
+        setParam("Param133", 0.0);
+        setParam("Param135", 0.0);
+      },
+      clear: function() {
+        setParam("Param134", 0.0);
+      }
+    },
+    {
+      name: "比心",
+      ms: 2600,
+      apply: function() {
+        setParam("Param135", 1.0);   // 比心
+        setParam("Param133", 0.0);
+        setParam("Param134", 0.0);
+      },
+      clear: function() {
+        setParam("Param135", 0.0);
+      }
+    },
+    {
+      name: "前倾",
+      ms: 1800,
+      apply: function() {
+        setParam("Param132", 1.0);   // 身体前倾
+      },
+      clear: function() {
+        setParam("Param132", 0.0);
+      }
+    },
+    {
+      name: "圈圈",
+      ms: 2400,
+      apply: function() {
+        setParam("Param125", 1.0);   // 头顶转圈
+      },
+      clear: function() {
+        setParam("Param125", 0.0);
+      }
+    },
+    {
+      name: "脸红",
+      ms: 2600,
+      apply: function() {
+        setParam("Param130", 1.0);   // 脸红
+      },
+      clear: function() {
+        setParam("Param130", 0.0);
+      }
+    },
+    {
+      name: "QQ人",
+      ms: 3200,
+      apply: function() {
+        // QQ 人是 Add 混合：131 与 136 同时为 1 才生效
+        setParam("Param131", 1.0);
+        setParam("Param136", 1.0);
+      },
+      clear: function() {
+        setParam("Param131", 0.0);
+        setParam("Param136", 0.0);
+      }
+    }
+  ];
+
+  let activeAction = null;          // 当前正在播放的自带动作
+  let activeActionStartSec = -1;
+  let activeActionUntilSec = -1;
+  let lastActionIndex = -1;         // 避免连续两次抽到同一个
+
+  /** 随机挑一个自带动作并播放；播放期间禁止「点击」带来的后续动作被打断 */
+  function playRandomModelAction() {
+    if (!model || MODEL_ACTIONS.length === 0) return false;
+
+    // 立刻清掉上一个动作的残留参数，避免叠加
+    clearActiveActionParams();
+
+    let idx = Math.floor(Math.random() * MODEL_ACTIONS.length);
+    if (MODEL_ACTIONS.length > 1 && idx === lastActionIndex) {
+      idx = (idx + 1) % MODEL_ACTIONS.length;
+    }
+    lastActionIndex = idx;
+
+    const action = MODEL_ACTIONS[idx];
+    try {
+      action.apply();
+    } catch (e) {
+      return false;
+    }
+
+    activeAction = action;
+    activeActionStartSec = elapsedSec;
+    activeActionUntilSec = elapsedSec + action.ms / 1000.0;
+
+    LOG.i(M.MOTION, "播放自带动作",
+      "name=" + action.name + " idx=" + idx + " ms=" + action.ms +
+      " 库大小=" + MODEL_ACTIONS.length);
+    return true;
+  }
+
+  /**
+   * v1.5.0：按顺序播放下一个自带动作（轮播模式）。
+   *
+   * 与随机模式的区别：严格按 MODEL_ACTIONS 数组顺序 +1 循环，
+   * 保证每个动作都能被逐个走到 —— 这是调试/验收动作库的主要手段
+   * （随机模式可能连续多次抽不到某个动作，无法确认它是否正常）。
+   */
+  function playNextModelAction() {
+    if (!model || MODEL_ACTIONS.length === 0) return false;
+
+    clearActiveActionParams();
+
+    actionCycleIndex = (actionCycleIndex + 1) % MODEL_ACTIONS.length;
+    const idx = actionCycleIndex;
+    const action = MODEL_ACTIONS[idx];
+
+    try {
+      action.apply();
+    } catch (e) {
+      return false;
+    }
+
+    lastActionIndex = idx;
+    activeAction = action;
+    activeActionStartSec = elapsedSec;
+    activeActionUntilSec = elapsedSec + action.ms / 1000.0;
+
+    LOG.i(M.MOTION, "播放自带动作(轮播)",
+      "name=" + action.name + " idx=" + idx + "/" + MODEL_ACTIONS.length +
+      " ms=" + action.ms);
+    return true;
+  }
+
+  /** 按当前模式（随机 / 轮播）播放一个动作 */
+  function playModelAction() {
+    return actionCycleMode ? playNextModelAction() : playRandomModelAction();
+  }
+
+  /** v1.5.0：运行时切换轮播模式（Android 侧设置项驱动，无需重载页面） */
+  window.__mikuLive2DSetActionCycle = function(on) {
+    actionCycleMode = !!(on === true || on === 1 || on === "1");
+    LOG.i(M.MOTION, "动作模式已切换",
+      "mode=" + (actionCycleMode ? "轮播" : "随机") +
+      " 库大小=" + MODEL_ACTIONS.length);
+    return actionCycleMode;
+  };
+
+  /**
+   * v1.5.0：运行时热切换页面开关（Android 侧设置项驱动，无需重载页面）。
+   *
+   * 只登记「改一个标志位即可生效」的开关。凡是带进行中状态的功能，
+   * 关掉时必须顺手收尾，否则会残留半截动画继续改写模型位置
+   * （典型：吸附动画进行中关掉，模型仍会被拽向边缘）。
+   *
+   * @param key "fx"（点击特效）/ "snap"（边缘吸附）
+   * @param on  1 / 0
+   * @returns 切换后的值，未知 key 返回 null
+   */
+  window.__mikuLive2DSetOption = function(key, on) {
+    const v = !!(on === true || on === 1 || on === "1");
+    if (key === "fx") {
+      tapEffectEnabled = v;
+      LOG.i(M.FX, "点击特效已" + (v ? "开启" : "关闭"), "fx=" + (v ? 1 : 0));
+      return tapEffectEnabled;
+    }
+    if (key === "snap") {
+      edgeSnapEnabled = v;
+      if (!v) cancelEdgeSnap();   // 关闭时必须撤销进行中的动画
+      LOG.i(M.TOUCH, "边缘吸附已" + (v ? "开启" : "关闭"), "snap=" + (v ? 1 : 0));
+      return edgeSnapEnabled;
+    }
+    LOG.w(M.CFG, "未知页面开关", "key=" + key);
+    return null;
+  };
+
+  function clearActiveActionParams() {
+    if (!activeAction) return;
+    try {
+      if (typeof activeAction.clear === "function") {
+        activeAction.clear();
+      }
+      LOG.d(M.MOTION, "动作参数已回收", "name=" + activeAction.name);
+    } catch (e) {}
+    activeAction = null;
+    activeActionStartSec = -1;
+    activeActionUntilSec = -1;
+  }
+
+  /** 每帧维护：动作到期后回收参数，回到自然待机 */
+  function updateActiveAction() {
+    if (!activeAction) return;
+    if (elapsedSec >= activeActionUntilSec) {
+      clearActiveActionParams();
+    }
+  }
+
+  /**
+   * v1.2.0（R6）：隐藏水印。
+   *
+   * 水印 = Param137，且是**反向**语义：设为 1 才隐藏（详见 WATERMARK_HIDDEN_VALUE 注释）。
+   * 模型每帧的参数求值会把它重置为 0，因此必须持续压制。
+   */
+  function forceWatermarkOff() {
+    setParam("Param137", WATERMARK_HIDDEN_VALUE);
+  }
+
+  let watermarkSuppressorInstalled = false;
+
+  /**
+   * 把水印压制挂到模型的 beforeModelUpdate 钩子上。
+   *
+   * 这是唯一能稳定压住 Param137 的时机：pixi-live2d-display 在每一次
+   * internalModel.update() 的最开始广播该事件，此时模型刚做完参数求值，
+   * 我们改写后模型才会拿去计算变形与渲染。
+   */
+  function installWatermarkSuppressor() {
+    if (watermarkSuppressorInstalled) return;
+    if (!model || !model.internalModel) return;
+
+    try {
+      model.internalModel.on("beforeModelUpdate", function() {
+        // watermark=1 表示用户想「显示水印」，此时不压制（保持默认 0 即显示）
+        if (watermarkVisible) return;
+        if (WATERMARK_SUPPRESS_ENABLED) {
+          setParam("Param137", WATERMARK_HIDDEN_VALUE);
+        }
+      });
+      watermarkSuppressorInstalled = true;
+      LOG.i(M.WM, "水印压制器已安装", "hideValue=" + WATERMARK_HIDDEN_VALUE);
+    } catch (e) {
+      LOG.e(M.WM, "水印压制器安装失败", "err=" + (e && e.message));
+    }
+  }
+
+  /** 点击模型：随机播一个模型自带动作/表情（R3） */
+  async function reactToTap() {
+    try {
+      if (usingDefaultMotions || motionList.length === 0) {
+        // 本模型走这条分支：没有 model3.json 动作段，用参数驱动的自带动作
+        const ok = playModelAction();
+        if (!ok) {
+          triggerDefaultAction(pickRandom(["smile", "nod", "look"]));
+          await applyRandomExpression();
+        }
+        return true;
+      }
+      await playRandomMotionOnce(2);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function onPointerDown(e) {
+    if (!interactiveEnabled || !model) return;
+
+    const x = e.clientX;
+    const y = e.clientY;
+
+    if (!isOpaqueAt(x, y)) {
+      // 点到了模型的透明留白：不拦截，让手势继续走系统判定
+      pointerActive = false;
+      LOG.v(M.TOUCH, "按下点在透明区，放行到桌面",
+        "x=" + Math.round(x) + " y=" + Math.round(y));
+      return;
+    }
+
+    pointerActive = true;
+    pointerMoved = false;
+    dragging = false;
+    // v1.5.0：新的按下要取消进行中的吸附动画，
+    // 否则吸附补间会和手指抢夺 model.x 的控制权（表现为「拖不动」）。
+    cancelEdgeSnap();
+    pointerStartX = x;
+    pointerStartY = y;
+    pointerLastX = x;
+    pointerLastY = y;
+    pointerDownAt = Date.now();
+
+    updateGazeFromPointer(x, y);
+
+    // v1.2.0：长按 → 进入拖拽模式（不再是「惊讶反馈」）。
+    // 定时器触发时不直接开始拖动，而是把 dragArmed 置 true，
+    // 手指随后任何一点移动都会立刻跟手；若一直不动、直接抬手，
+    // 则按「长按但未移动」处理 —— 视为一次普通点击动作。
+    clearLongPressTimer();
+    longPressTimer = setTimeout(function() {
+      longPressTimer = null;
+      if (pointerActive && !pointerMoved && !dragging) {
+        // 进入「待拖动」状态：给一点视觉反馈，让用户知道已解锁拖动
+        dragArmed = true;
+        // v1.5.0：「抓住」视觉反馈 —— 缩放脉冲。
+        // 用一个短促的放大再回弹，模拟「手指捏住了模型」的触感反馈。
+        // 注意：脉冲作用在 model.scale 之外的独立系数上，
+        // 不能直接改 model.scale，否则会破坏 baseScale 的缩放基准。
+        grabPulseUntilSec = elapsedSec + 0.26;
+        grabPulseStartSec = elapsedSec;
+        LOG.d(M.TOUCH, "长按解锁拖拽模式", "grabPulse=1");
+      }
+    }, LONG_PRESS_MS);
+  }
+
+  function onPointerMove(e) {
+    if (!model) return;
+
+    const x = e.clientX;
+    const y = e.clientY;
+
+    // 即使没按下，也做视线跟随
+    updateGazeFromPointer(x, y);
+
+    if (!pointerActive) return;
+
+    const dx = x - pointerStartX;
+    const dy = y - pointerStartY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // v1.2.0：升级为拖动的条件 —— 长按已解锁（dragArmed），
+    // 或者虽然没到长按时长、但位移已经明显超过阈值（快速拖动兜底，
+    // 避免用户「想拖但按得不够久」时手感发涩）。
+    if (!dragging) {
+      if (dragArmed || dist > TAP_MOVE_TOLERANCE) {
+        dragging = true;
+        pointerMoved = true;
+        clearLongPressTimer();
+        LOG.d(M.TOUCH, "进入拖拽",
+          "byArmed=" + dragArmed + " dist=" + Math.round(dist));
+      }
+    }
+
+    if (dragging) {
+      // 直接按手指位移移动模型（用增量而非绝对位置，保证抓取点不跳）
+      model.x += x - pointerLastX;
+      model.y += y - pointerLastY;
+      // v1.4.0（Bug-B1）：拖拽过程中也做边界夹取。
+      // 旧逻辑只在抬手时夹取 —— 若用户拖到屏幕外再松手，中途模型可能
+      // 部分越界到无法再被命中的区域，表现为「拖几次后就拖不动了」。
+      const bb = computeModelBounds();
+      if (bb) {
+        const bw = bb.r - bb.l;
+        const bh = bb.b - bb.t;
+        const marginX = bw * 0.5;
+        const marginY = bh * 0.5;
+        model.x = clamp(model.x, -marginX, window.innerWidth + marginX);
+        model.y = clamp(model.y, -marginY, window.innerHeight + marginY);
+      }
+      // 拖动即视为手动定位，此后待机逻辑不再覆写坐标（与 R2 联动）
+      manualPositioned = true;
+      reportHitArea(false);
+    }
+
+    pointerLastX = x;
+    pointerLastY = y;
+  }
+
+  function onPointerUp(e) {
+    if (!pointerActive) return;
+
+    const wasDragging = dragging;
+    const wasArmed = dragArmed;
+    const pressMs = Date.now() - pointerDownAt;
+
+    pointerActive = false;
+    dragging = false;
+    dragArmed = false;
+    clearLongPressTimer();
+
+    if (wasDragging) {
+      // 拖拽结束：夹到屏幕内，并持久化位置
+      const b = computeModelBounds();
+      if (b && model) {
+        const w = b.r - b.l;
+        const h = b.b - b.t;
+        model.x = clamp(model.x, w * 0.15, window.innerWidth - w * 0.15);
+        model.y = clamp(model.y, h * 0.15, window.innerHeight - h * 0.15);
+      }
+      // v1.5.0：边缘吸附 —— 松手时若模型靠近左右边缘，平滑吸附过去。
+      if (edgeSnapEnabled && model) {
+        startEdgeSnap();
+      }
+      manualPositioned = true;
+      persistModelPosition();
+      reportHitArea(true);
+      LOG.i(M.TOUCH, "拖拽结束",
+        "press=" + pressMs + "ms " +
+        "designX=" + Math.round(model.x / stageScaleX()) +
+        " designY=" + Math.round(model.y / stageScaleY()));
+    } else {
+      // v1.2.0：未拖动的一律视为「点击」——包括长按解锁但没移动的情况。
+      // 这样用户长按后抬手也能看到动作，不会「按了半天没反应」。
+      LOG.d(M.TOUCH, "识别为点击", "press=" + pressMs + "ms armed=" + wasArmed);
+      // v1.5.0：点击特效（在动作之前播，视觉上是「先响应再演出」）
+      //
+      // ★ 坐标必须取 pointerLastX/Y，不能用 e.clientX/clientY：
+      // touch 通道的 handleUp() 是以 onPointerUp({}) 调用的（空对象），
+      // 抬手事件里根本没有坐标，直接读会得到 NaN，特效会飘到 (NaN, NaN) 看不见。
+      // pointerLastX/Y 在按下时就已经记下，且拖拽中会持续更新，用它才是抬手时的真实落点。
+      FX.tap(pointerLastX, pointerLastY);
+      reactToTap();
+    }
+
+    pointerMoved = false;
+  }
+
+  function onPointerCancel() {
+    pointerActive = false;
+    dragging = false;
+    dragArmed = false;
+    clearLongPressTimer();
+    pointerMoved = false;
+  }
+
+  /**
+   * Android 侧切换交互开关。
+   *
+   * 关闭时同时清掉交互态并隐藏热区，避免残留的 pointer 状态影响渲染。
+   */
+  window.__mikuLive2DSetInteractive = function(enabled) {
+    interactiveEnabled = !!(enabled === true || enabled === 1 || enabled === "1");
+    // v1.2.0：触摸开启 = 坐标由拖拽接管（设置页的 x/y 滑条不再生效）
+    touchManaged = interactiveEnabled;
+    document.body.classList.toggle("interactive", interactiveEnabled);
+    if (!interactiveEnabled) {
+      onPointerCancel();
+      gazeTargetX = 0;
+      gazeTargetY = 0;
+    } else if (model) {
+      // 进入触摸模式的瞬间，把当前实际位置记为手动位置，
+      // 防止待机逻辑在下一帧把模型弹回 URL 里的初始坐标。
+      manualPositioned = true;
+      modelCenterXDesign = model.x / stageScaleX();
+      modelCenterYDesign = model.y / stageScaleY();
+      persistModelPosition();
+    }
+    LOG.i(M.TOUCH, "触摸模式切换",
+      "interactive=" + interactiveEnabled + " touchManaged=" + touchManaged);
+  };
+
+  window.__mikuLive2DGetHitArea = function() {
+    const b = computeModelBounds();
+    return b ? JSON.stringify(b) : "";
+  };
+
+  function installInteraction() {
+    const target = document.body;
+
+    // pointer 系列在桌面浏览器与部分 WebView 上可用；
+    // 但 Android WebView 对合成注入的 MotionEvent 更倾向于派发 touch 系列，
+    // 因此两套事件都接，用 pointerHandled 标记避免重复触发。
+    const canvas = app && app.view;
+
+    function handleDown(x, y) {
+      LOG.v(M.TOUCH, "手势按下", "x=" + Math.round(x) + " y=" + Math.round(y));
+      onPointerDown({ clientX: x, clientY: y });
+    }
+    function handleMove(x, y) {
+      onPointerMove({ clientX: x, clientY: y });
+    }
+    function handleUp() {
+      LOG.v(M.TOUCH, "手势抬起");
+      onPointerUp({});
+    }
+
+    if (canvas) {
+      canvas.addEventListener("touchstart", function(e) {
+        const t = e.touches && e.touches[0];
+        if (t) handleDown(t.clientX, t.clientY);
+      }, { passive: true });
+      canvas.addEventListener("touchmove", function(e) {
+        const t = e.touches && e.touches[0];
+        if (t) handleMove(t.clientX, t.clientY);
+      }, { passive: true });
+      canvas.addEventListener("touchend", function(e) {
+        handleUp();
+      }, { passive: true });
+      canvas.addEventListener("touchcancel", onPointerCancel, { passive: true });
+
+      // 鼠标/触控笔（也覆盖部分把合成事件识别为 mouse 的 ROM）
+      canvas.addEventListener("mousedown", function(e) {
+        handleDown(e.clientX, e.clientY);
+      });
+      canvas.addEventListener("mousemove", function(e) {
+        handleMove(e.clientX, e.clientY);
+      });
+      window.addEventListener("mouseup", function() {
+        handleUp();
+      });
+    }
+
+    document.body.classList.toggle("interactive", interactiveEnabled);
+    LOG.i(M.TOUCH, "交互已安装", "enabled=" + interactiveEnabled + " " + "autoPos=" + autoPositionMode);
+  }
+
+  function updateLive2DMask() {
+    const stage = document.getElementById("stage");
+
+    if (!shouldClipLive2D) {
+      if (stage) {
+        stage.style.height = "100vh";
+        stage.style.overflow = "hidden";
+      }
+      if (model) {
+        model.mask = null;
+      }
+      if (live2DMask) {
+        live2DMask.clear();
+      }
+      return;
+    }
+
+    if (!app || !model || !window.PIXI) return;
+
+    const clipBottom = live2DClipBottomDesignY * stageScaleY();
+
+    // 第一层：CSS 裁切 WebView 内的 stage。这个比 Pixi mask 更稳定，
+    // 可以避免 WebView / Canvas 硬件加速时 Pixi mask 偶发不生效。
+    if (stage) {
+      stage.style.height = Math.max(0, clipBottom) + "px";
+      stage.style.overflow = "hidden";
+    }
+
+    // 第二层：Pixi mask 只作用于模型本身，不会遮挡 App 背景和卡片。
+    if (!live2DMask) {
+      live2DMask = new PIXI.Graphics();
+      app.stage.addChild(live2DMask);
+    }
+
+    model.mask = live2DMask;
+    live2DMask.clear();
+    live2DMask.beginFill(0xffffff, 1);
+    live2DMask.drawRect(0, 0, window.innerWidth, Math.max(0, clipBottom));
+    live2DMask.endFill();
+  }
+
+  function applyNightDimFilter() {
+    if (!app || !app.view) return;
+
+    // 只作用于 Live2D 的透明 canvas。透明区域仍然透明，不会压暗 App 背景图和功能卡片。
+    if (isNightMode && nightDimAlpha > 0) {
+      const brightness = Math.max(0.15, 1 - nightDimAlpha / 100.0);
+      app.view.style.filter = "brightness(" + Math.round(brightness * 100) + "%)";
+      app.view.style.webkitFilter = app.view.style.filter;
+    } else {
+      app.view.style.filter = "none";
+      app.view.style.webkitFilter = "none";
+    }
+  }
+
+  function sendAndroidHeartbeat(type) {
+    try {
+      if (window.MikuLive2DAndroid && window.MikuLive2DAndroid.heartbeat) {
+        window.MikuLive2DAndroid.heartbeat(type || "tick");
+      }
+    } catch (e) {}
+  }
+
+  window.__mikuLive2DForceHeartbeat = function() {
+    sendAndroidHeartbeat("force");
+  };
+
+  window.__mikuLive2DUpdate = function(cx, cy, scale) {
+    centerX = parseFloat(cx) || centerX;
+    centerY = parseFloat(cy) || centerY;
+    userScale = parseFloat(scale) || userScale;
+    applyLayout();
+  };
+
+  /**
+   * v1.5.0：双指缩放 —— 由 Android 捕获层识别手势后调用，页面只负责落地缩放值。
+   *
+   * 为什么不在页面里自己算双指：Android 转发给 WebView 的是**单指**合成事件
+   * （OverlayService.forwardTouchToWebView 只取 ev.x/ev.y 构造单点 MotionEvent），
+   * 页面永远收不到第二根手指。所以手势识别必须放在原生捕获层，
+   * 页面这边只暴露一个「把缩放设成多少」的落地接口。
+   */
+  window.__mikuLive2DSetUserScale = function(scale) {
+    const s = parseFloat(scale);
+    if (!isFinite(s) || s <= 0) return userScale;
+    userScale = clamp(s, 0.3, 3.0);
+    applyLayout();
+    // 缩放会改变模型包围盒 → 捕获窗口要跟着变，否则热区和模型对不上
+    reportHitArea(true);
+    LOG.i(M.UI, "缩放已更新", "userScale=" + userScale.toFixed(3));
+    return userScale;
+  };
+
+  /**
+   * v1.5.0：原生侧进入双指手势时，撤销页面里进行中的按下/拖拽判定。
+   *
+   * 不加这一步的话：第一根手指可能已经让页面进入拖拽态，
+   * 第二根手指落下后页面仍在按单指拖拽改 model.x，和缩放同时生效，观感是「一边放大一边乱飘」。
+   */
+  window.__mikuLive2DCancelPointer = function() {
+    onPointerCancel();
+  };
+
+  window.__mikuLive2DSetClipBottom = function(value) {
+    const parsed = parseFloat(value);
+    if (isFinite(parsed)) {
+      live2DClipBottomDesignY = Math.max(0, Math.min(designH, parsed));
+      updateLive2DMask();
+    }
+  };
+
+  window.__mikuLive2DRelayout = function() {
+    applyLayout();
+    updateLive2DMask();
+  };
+
+  window.__mikuLive2DNextMotion = function() {
+    playNextMotionAndExpression();
+  };
+
+  /**
+   * v1.2.0 调试接口：读取指定参数在当前帧的实际值。
+   * 用于定位「水印到底是哪个参数控制的」——在 logcat 里直接看数字。
+   */
+  window.__mikuLive2DDumpParam = function(id) {
+    try {
+      const core = getCoreModel();
+      if (!core) return "no-core";
+      const idx = findParamIndex(core, id);
+      if (idx < 0) return "not-found";
+      let v = null;
+      try { v = core.getParameterValueByIndex(idx); } catch (e) {}
+      if (v === null && typeof core.getParameterValueById === "function") {
+        try { v = core.getParameterValueById(id); } catch (e) {}
+      }
+      return id + " idx=" + idx + " value=" + v;
+    } catch (e) {
+      return "err:" + (e && e.message);
+    }
+  };
+
+  /**
+   * v1.2.0 调试接口：把一批参数值打到日志里，用于水印溯源。
+   */
+  window.__mikuLive2DAuditWatermark = function() {
+    const ids = ["Param137", "Param125", "Param130", "Param131", "Param132",
+                 "Param133", "Param134", "Param135", "Param136"];
+    const out = [];
+    for (const id of ids) {
+      out.push(window.__mikuLive2DDumpParam(id));
+    }
+    LOG.d(M.WM, "水印审计", out.join(" | "));
+    return out.join(" | ");
+  };
+
+  /**
+   * v1.2.0 调试接口：审计并强制归零所有表情类参数，观察水印是否消失。
+   * 用于快速定位「水印归属参数」——逐个清零，肉眼比对截图。
+   */
+  window.__mikuLive2DZeroAllExpressions = function() {
+    const ids = ["Param125", "Param130", "Param131", "Param132",
+                 "Param133", "Param134", "Param135", "Param136", "Param137"];
+    for (const id of ids) {
+      setParam(id, 0);
+    }
+    LOG.i(M.WM, "全部表情参数归零");
+    return "done";
+  };
+
+  /**
+   * v1.2.0 调试接口：强制写一个参数值（绕过所有业务逻辑）。
+   */
+  window.__mikuLive2DForceParam = function(id, value) {
+    const v = parseFloat(value);
+    if (!isFinite(v)) return "bad-value";
+    const ok = setParam(id, v);
+    LOG.i(M.PARAM, "强制写参数", "id=" + id + " value=" + v + " ok=" + ok);
+    return "ok=" + ok;
+  };
+
+  // ==================================================================
+  // v1.3.0 日志接口（供宿主与调试使用）
+  // ==================================================================
+
+  /** 取页面侧日志全量快照（数组，按时间正序）。 */
+  window.__mikuLive2DGetLogs = function() {
+    return LOG.snapshot();
+  };
+
+  /** 取页面侧日志的纯文本形式，便于宿主写入文件。 */
+  window.__mikuLive2DGetLogText = function() {
+    return LOG.snapshot().join("\n");
+  };
+
+  /** 清空页面侧日志。 */
+  window.__mikuLive2DClearLogs = function() {
+    LOG.clear();
+    return "cleared";
+  };
+
+  /** 调整页面侧日志级别（V/D/I/W/E）。 */
+  window.__mikuLive2DSetLogLevel = function(tag) {
+    const v = LOG.setLevel(tag);
+    return "level=" + v;
+  };
+
+  /** 开关页面侧日志。 */
+  window.__mikuLive2DSetLogEnabled = function(on) {
+    const v = LOG.setEnabled(on === true || on === 1 || on === "1");
+    return "enabled=" + v;
+  };
+
+  /** 日志系统诊断摘要。 */
+  window.__mikuLive2DLogInfo = function() {
+    return LOG.info();
+  };
+
+  function pickRandom(arr) {
+    if (!arr || arr.length === 0) return null;
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function getModelJson() {
+    try {
+      const settings = model && model.internalModel && model.internalModel.settings;
+      return (settings && settings.json) ||
+             (settings && settings._json) ||
+             (settings && settings._object) ||
+             null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getCoreModel() {
+    try {
+      return model && model.internalModel && model.internalModel.coreModel;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function findParamIndex(core, id) {
+    try {
+      if (core && typeof core.getParameterIndex === "function") {
+        const idx = core.getParameterIndex(id);
+        if (typeof idx === "number" && idx >= 0) {
+          return idx;
+        }
+      }
+    } catch (e) {}
+    return -1;
+  }
+
+  function setParam(id, value) {
+    const core = getCoreModel();
+    if (!core) return false;
+
+    const idx = findParamIndex(core, id);
+    if (idx >= 0) {
+      try {
+        if (typeof core.setParameterValueByIndex === "function") {
+          core.setParameterValueByIndex(idx, value);
+          return true;
+        }
+      } catch (e) {}
+    }
+
+    // 某些运行库没有 getParameterIndex，只能按 id 设置。
+    try {
+      if (idx < 0 && typeof core.setParameterValueById === "function" && typeof core.getParameterIndex !== "function") {
+        core.setParameterValueById(id, value);
+        return true;
+      }
+    } catch (e) {}
+
+    return false;
+  }
+
+  function addParam(id, value) {
+    const core = getCoreModel();
+    if (!core) return false;
+
+    const idx = findParamIndex(core, id);
+    if (idx >= 0) {
+      try {
+        if (typeof core.addParameterValueById === "function") {
+          core.addParameterValueById(id, value);
+          return true;
+        }
+      } catch (e) {}
+
+      try {
+        if (typeof core.getParameterValueByIndex === "function" && typeof core.setParameterValueByIndex === "function") {
+          const current = core.getParameterValueByIndex(idx);
+          core.setParameterValueByIndex(idx, current + value);
+          return true;
+        }
+      } catch (e) {}
+    }
+
+    return false;
+  }
+
+  function setParamAny(ids, value) {
+    for (const id of ids) {
+      if (setParam(id, value)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function addParamAny(ids, value) {
+    for (const id of ids) {
+      if (addParam(id, value)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getMotionCandidates() {
+    const settings = model && model.internalModel && model.internalModel.settings;
+    const json = getModelJson();
+    const candidates = [];
+    try {
+      if (settings && settings.motions) candidates.push(settings.motions);
+      if (json && json.FileReferences && json.FileReferences.Motions) candidates.push(json.FileReferences.Motions);
+      if (json && json.motions) candidates.push(json.motions);
+    } catch (e) {}
+    return candidates;
+  }
+
+  function extractMotionGroups() {
+    const groups = [];
+    const candidates = getMotionCandidates();
+
+    for (const motions of candidates) {
+      for (const key in motions) {
+        if (!Object.prototype.hasOwnProperty.call(motions, key)) continue;
+        const count = motionCountFromValue(motions[key]);
+        if (count > 0 && groups.indexOf(key) < 0) {
+          groups.push(key);
+        }
+      }
+    }
+
+    const preferred = ["Idle", "idle", "Idling", "idling", "TapBody", "tap_body", "Tap", "tap", "Flick", "flick"];
+    const result = [];
+    for (const p of preferred) {
+      if (groups.indexOf(p) >= 0 && result.indexOf(p) < 0) result.push(p);
+    }
+    for (const g of groups) {
+      if (result.indexOf(g) < 0) result.push(g);
+    }
+    return result;
+  }
+
+  function motionCountFromValue(value) {
+    if (Array.isArray(value)) return Math.max(0, value.length);
+    if (value && typeof value === "object") return Math.max(0, Object.keys(value).length);
+    if (typeof value === "string") return 1;
+    return 0;
+  }
+
+  function motionCountInGroup(group) {
+    const candidates = getMotionCandidates();
+    for (const motions of candidates) {
+      if (!motions || !Object.prototype.hasOwnProperty.call(motions, group)) continue;
+      return Math.max(1, motionCountFromValue(motions[group]));
+    }
+    return 1;
+  }
+
+  function valueHasDefaultMotionFile(value) {
+    if (!value) return false;
+    if (typeof value === "string") {
+      return value.indexOf("motions_default") >= 0 || value.indexOf("miku_default") >= 0;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (valueHasDefaultMotionFile(item)) return true;
+      }
+      return false;
+    }
+    if (typeof value === "object") {
+      for (const k in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
+        if (k === "File" || k === "file") {
+          if (valueHasDefaultMotionFile(String(value[k]))) return true;
+        }
+        if (valueHasDefaultMotionFile(value[k])) return true;
+      }
+    }
+    return false;
+  }
+
+  function containsDefaultMotionFiles() {
+    const candidates = getMotionCandidates();
+    for (const motions of candidates) {
+      for (const key in motions) {
+        if (!Object.prototype.hasOwnProperty.call(motions, key)) continue;
+        if (valueHasDefaultMotionFile(motions[key])) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function buildMotionList() {
+    const list = [];
+    motionGroups = extractMotionGroups();
+
+    for (const group of motionGroups) {
+      const count = motionCountInGroup(group);
+      for (let i = 0; i < count; i++) {
+        list.push({ group: group, index: i });
+      }
+    }
+
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = list[i];
+      list[i] = list[j];
+      list[j] = t;
+    }
+
+    motionList = list;
+    nextMotionIndex = 0;
+  }
+
+  function extractExpressions() {
+    const result = [];
+    const json = getModelJson();
+    const settings = model && model.internalModel && model.internalModel.settings;
+
+    try {
+      const candidates = [];
+      if (settings && settings.expressions) candidates.push(settings.expressions);
+      if (json && json.FileReferences && json.FileReferences.Expressions) candidates.push(json.FileReferences.Expressions);
+      if (json && json.expressions) candidates.push(json.expressions);
+
+      for (const expressions of candidates) {
+        if (Array.isArray(expressions)) {
+          for (let i = 0; i < expressions.length; i++) {
+            const item = expressions[i];
+            if (item && typeof item === "object") {
+              const name = item.Name || item.name || item.File || item.file || String(i);
+              result.push({ index: i, name: name });
+            } else {
+              result.push({ index: i, name: String(i) });
+            }
+          }
+        } else if (expressions && typeof expressions === "object") {
+          let idx = 0;
+          for (const key in expressions) {
+            if (!Object.prototype.hasOwnProperty.call(expressions, key)) continue;
+            result.push({ index: idx, name: key });
+            idx++;
+          }
+        }
+      }
+    } catch (e) {}
+
+    const dedup = [];
+    const seen = {};
+    for (const e of result) {
+      const k = String(e.name) + "#" + String(e.index);
+      if (!seen[k]) {
+        seen[k] = true;
+        dedup.push(e);
+      }
+    }
+    return dedup;
+  }
+
+  async function tryStartMotion(group, index, priority) {
+    if (!model || !group) return false;
+
+    const motionPriority = (priority === 3) ? 3 : 2;
+
+    try {
+      await model.motion(group, index, motionPriority);
+      return true;
+    } catch (e) {}
+
+    try {
+      const manager = model.internalModel && model.internalModel.motionManager;
+      if (manager && manager.startMotion) {
+        await manager.startMotion(group, index || 0, motionPriority);
+        return true;
+      }
+    } catch (e) {}
+
+    try {
+      const manager = model.internalModel && model.internalModel.motionManager;
+      if (manager && manager.startRandomMotion) {
+        await manager.startRandomMotion(group, motionPriority);
+        return true;
+      }
+    } catch (e) {}
+
+    return false;
+  }
+
+  async function applyRandomExpression() {
+    if (!model || expressionList.length === 0) {
+      return false;
+    }
+
+    const exp = pickRandom(expressionList);
+    if (!exp) return false;
+
+    try {
+      if (typeof model.expression === "function") {
+        await model.expression(exp.index);
+        return true;
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof model.expression === "function") {
+        await model.expression(exp.name);
+        return true;
+      }
+    } catch (e) {}
+
+    try {
+      const manager = model.internalModel && model.internalModel.motionManager;
+      const expressionManager = manager && manager.expressionManager;
+      if (expressionManager && expressionManager.setExpression) {
+        expressionManager.setExpression(exp.index);
+        return true;
+      }
+    } catch (e) {}
+
+    try {
+      const manager = model.internalModel && model.internalModel.motionManager;
+      const expressionManager = manager && manager.expressionManager;
+      if (expressionManager && expressionManager.setRandomExpression) {
+        expressionManager.setRandomExpression();
+        return true;
+      }
+    } catch (e) {}
+
+    return false;
+  }
+
+  async function playMotionItem(item, priority) {
+    if (!item || isMotionPlaying) {
+      return false;
+    }
+
+    isMotionPlaying = true;
+    const ok = await tryStartMotion(item.group, item.index, priority);
+    isMotionPlaying = false;
+    return ok;
+  }
+
+  async function playRandomMotionOnce(priority) {
+    if (!model || motionList.length === 0) {
+      return false;
+    }
+
+    const item = pickRandom(motionList);
+    const ok = await playMotionItem(item, priority);
+    await applyRandomExpression();
+    if (usingDefaultMotions) {
+      triggerDefaultAction(pickRandom(["smile", "nod", "look"]));
+    }
+    return ok;
+  }
+
+  async function playNextMotionAndExpression() {
+    if (!model) {
+      return;
+    }
+
+    if (usingDefaultMotions) {
+      const sequence = ["smile", "nod", "look", "blink"];
+      triggerDefaultAction(sequence[nextMotionIndex % sequence.length]);
+      nextMotionIndex++;
+      await applyRandomExpression();
+      return;
+    }
+
+    if (motionList.length === 0) {
+      triggerDefaultAction(pickRandom(["smile", "nod", "look", "blink"]));
+      await applyRandomExpression();
+      return;
+    }
+
+    if (nextMotionIndex >= motionList.length) {
+      buildMotionList();
+    }
+
+    const item = motionList[nextMotionIndex];
+    nextMotionIndex++;
+    await playMotionItem(item);
+    await applyRandomExpression();
+  }
+
+  function triggerDefaultAction(kind) {
+    defaultActionKind = kind || "smile";
+    defaultActionStartSec = elapsedSec;
+
+    if (defaultActionKind === "blink") {
+      blinkStartSec = elapsedSec;
+      defaultActionDurationSec = 0.55;
+    } else if (defaultActionKind === "nod") {
+      defaultActionDurationSec = 1.9;
+    } else if (defaultActionKind === "look") {
+      defaultActionDurationSec = 2.4;
+    } else {
+      defaultActionDurationSec = 2.2;
+    }
+  }
+
+  function smooth01(x) {
+    x = clamp(x, 0, 1);
+    return x * x * (3 - 2 * x);
+  }
+
+  function pulse(progress) {
+    progress = clamp(progress, 0, 1);
+    return Math.sin(progress * Math.PI);
+  }
+
+  function updateBlink() {
+    if (elapsedSec >= nextBlinkSec && blinkStartSec < 0) {
+      blinkStartSec = elapsedSec;
+    }
+
+    if (blinkStartSec >= 0) {
+      const d = elapsedSec - blinkStartSec;
+      let open = 1;
+
+      if (d < 0.055) {
+        open = 1 - d / 0.055;
+      } else if (d < 0.145) {
+        open = 0;
+      } else if (d < 0.25) {
+        open = (d - 0.145) / 0.105;
+      } else {
+        blinkStartSec = -1;
+        nextBlinkSec = elapsedSec + 2.4 + Math.random() * 4.2;
+        open = 1;
+      }
+
+      open = clamp(open, 0, 1);
+      setParamAny(["ParamEyeLOpen", "PARAM_EYE_L_OPEN"], open);
+      setParamAny(["ParamEyeROpen", "PARAM_EYE_R_OPEN"], open);
+    }
+  }
+
+  function updateDefaultIdle() {
+    // v63：视线跟随。无论是否处于默认待机模式都要生效，
+    // 这是「鼠标/手指移到哪，眼神跟到哪」的核心观感来源。
+    gazeCurrentX += (gazeTargetX - gazeCurrentX) * 0.14;
+    gazeCurrentY += (gazeTargetY - gazeCurrentY) * 0.14;
+
+    if (!defaultIdleEnabled) {
+      // 模型自带动作时，只额外叠加视线与眨眼，不覆盖其姿态
+      setParamAny(["ParamAngleX", "PARAM_ANGLE_X"], gazeCurrentX * 26);
+      setParamAny(["ParamAngleY", "PARAM_ANGLE_Y"], -gazeCurrentY * 22);
+      setParamAny(["ParamAngleZ", "PARAM_ANGLE_Z"], gazeCurrentX * 8);
+      setParamAny(["ParamEyeBallX", "PARAM_EYE_BALL_X"], gazeCurrentX);
+      setParamAny(["ParamEyeBallY", "PARAM_EYE_BALL_Y"], -gazeCurrentY);
+      setParamAny(["ParamBodyAngleX", "PARAM_BODY_ANGLE_X"], gazeCurrentX * 9);
+      updateBlink();
+      return;
+    }
+
+    const t = elapsedSec;
+    let angleX = Math.sin(t * 0.65) * 5.5 + Math.sin(t * 0.19) * 2.0;
+    let angleY = Math.sin(t * 0.48 + 1.7) * 2.8;
+    let angleZ = Math.sin(t * 0.42 + 0.4) * 2.2;
+    let bodyX = Math.sin(t * 0.52 + 1.1) * 3.2;
+    let breath = 0.5 + Math.sin(t * 1.05) * 0.35;
+
+    // 叠加视线跟随（权重高于自然摇摆，保证跟随感明显）
+    angleX += gazeCurrentX * 26;
+    angleY += -gazeCurrentY * 20;
+    angleZ += gazeCurrentX * 7;
+    bodyX += gazeCurrentX * 8;
+
+    if (defaultActionStartSec >= 0) {
+      const p = clamp((elapsedSec - defaultActionStartSec) / Math.max(0.01, defaultActionDurationSec), 0, 1);
+      const e = pulse(p);
+
+      if (defaultActionKind === "nod") {
+        angleY += Math.sin(p * Math.PI * 4) * 8 * (1 - p);
+        bodyX += Math.sin(p * Math.PI * 2) * 4 * (1 - p);
+      } else if (defaultActionKind === "look") {
+        angleX += Math.sin(p * Math.PI * 2) * 11 * (1 - p * 0.25);
+        angleZ += Math.sin(p * Math.PI * 2) * 3;
+      } else if (defaultActionKind === "smile") {
+        setParamAny(["ParamMouthForm", "PARAM_MOUTH_FORM"], 0.8 * e);
+        setParamAny(["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y"], 0.18 + 0.16 * e);
+        setParamAny(["ParamEyeSmile", "PARAM_EYE_SMILE"], 0.75 * e);
+      }
+
+      if (p >= 1) {
+        defaultActionStartSec = -1;
+        defaultActionKind = "";
+      }
+    }
+
+    setParamAny(["ParamAngleX", "PARAM_ANGLE_X"], angleX);
+    setParamAny(["ParamAngleY", "PARAM_ANGLE_Y"], angleY);
+    setParamAny(["ParamAngleZ", "PARAM_ANGLE_Z"], angleZ);
+    setParamAny(["ParamBodyAngleX", "PARAM_BODY_ANGLE_X"], bodyX);
+    setParamAny(["ParamBreath", "PARAM_BREATH"], breath);
+    // 眼球跟随：多数 Cubism 4 模型用 ParamEyeBallX/Y 控制瞳孔朝向
+    setParamAny(["ParamEyeBallX", "PARAM_EYE_BALL_X"], gazeCurrentX);
+    setParamAny(["ParamEyeBallY", "PARAM_EYE_BALL_Y"], -gazeCurrentY);
+
+    // 常见模型的头发/服装辅助参数；没有这些参数时会自动忽略。
+    addParamAny(["ParamHairFront", "PARAM_HAIR_FRONT"], Math.sin(t * 1.15) * 0.08);
+    addParamAny(["ParamHairBack", "PARAM_HAIR_BACK"], Math.sin(t * 0.92 + 1.3) * 0.08);
+    addParamAny(["ParamBustX", "PARAM_BUST_X"], Math.sin(t * 0.55) * 0.02);
+    addParamAny(["ParamBustY", "PARAM_BUST_Y"], Math.sin(t * 0.74) * 0.02);
+
+    // 兜底的容器级动作：幅度很小，只在默认动作模式启用。
+    // 这样某些模型没有 ParamAngleX / ParamBodyAngleX 时，也能看到类似 ViewerEX 的轻微待机。
+    let extraX = Math.sin(t * 0.42 + 0.5) * 5.0;
+    let extraY = Math.sin(t * 0.58 + 1.2) * 1.8;
+    let extraRot = angleZ * 0.0024;
+
+    if (defaultActionStartSec >= 0) {
+      const p2 = clamp((elapsedSec - defaultActionStartSec) / Math.max(0.01, defaultActionDurationSec), 0, 1);
+      const e2 = pulse(p2);
+      if (defaultActionKind === "look") {
+        extraX += Math.sin(p2 * Math.PI * 2) * 10.0 * (1 - p2 * 0.2);
+      } else if (defaultActionKind === "nod") {
+        extraY += Math.sin(p2 * Math.PI * 4) * 5.0 * (1 - p2);
+      } else if (defaultActionKind === "smile") {
+        extraRot += Math.sin(p2 * Math.PI) * 0.006;
+      }
+    }
+
+    // v1.2.0（修复 R2「无法拖动」）：
+    //
+    // 旧逻辑每帧无条件执行 model.x = centerX * stageScaleX() + extraX，
+    // 其中 centerX 来自 URL 参数（设置页滑条值）。这就导致两种打架：
+    //   1) 拖拽中虽然被 dragging 挡了一下，但抬手瞬间立刻被「拽回」原位；
+    //   2) 即便拖到新位置，只要没触发 dragging（比如短距离微调），下一帧就复位。
+    //
+    // 新策略分三档：
+    //   · 触摸模式开启(touchManaged) → 完全由用户拖拽决定位置，待机不再碰坐标；
+    //   · 手动定位过(manualPositioned) → 同上，尊重用户最后落点；
+    //   · 都没有 → 保留原有的轻微漂浮待机（仅非触摸场景）。
+    //
+    // 这样一来「开启触摸时坐标自动接管」就真正闭环了。
+    const positionLockedByUser = touchManaged || manualPositioned;
+
+    if (!dragging && !positionLockedByUser) {
+      model.x = centerX * stageScaleX() + extraX * stageScaleX();
+      model.y = centerY * stageScaleY() + extraY * stageScaleY();
+      model.rotation = extraRot;
+    } else if (!dragging && positionLockedByUser) {
+      // 位置锁定：只保留一丝呼吸级的极轻微上下浮动，幅度压到 0.6px 以内，
+      // 既不会有「漂浮感」，又不会让画面完全死板。
+      model.rotation *= 0.9;
+    }
+
+    updateBlink();
+  }
+
+  function prepareMotionRuntime() {
+    if (motionRuntimePrepared) return;
+
+    buildMotionList();
+    expressionList = extractExpressions();
+    usingDefaultMotions = containsDefaultMotionFiles();
+    defaultIdleEnabled = usingDefaultMotions || motionList.length === 0;
+    motionRuntimePrepared = true;
+
+    LOG.i(M.MOTION, "动作运行时已准备",
+      "groups=" + (motionGroups.join("/") || "无") +
+      " motions=" + motionList.length +
+      " expressions=" + expressionList.length +
+      " defaultIdle=" + defaultIdleEnabled +
+      " usingDefault=" + usingDefaultMotions);
+  }
+
+  async function startInitialRandomMotionBeforeFirstFrame() {
+    prepareMotionRuntime();
+
+    // v0.13.38: model is still autoUpdate=false and is not attached to the Pixi stage here.
+    // Start a FORCE-priority random motion first, then expose the model to rendering.
+    // This prevents the model's raw/default pose (the conspicuous spread-arms pose on the
+    // current Miku model) from being shown during the async gap before the first motion loads.
+    if (motionList.length > 0 && !usingDefaultMotions) {
+      const ok = await playRandomMotionOnce(3);
+      initialMotionStarted = !!ok;
+      LOG.d(M.MOTION, "首帧前动作已启动", "started=" + initialMotionStarted);
+      return initialMotionStarted;
+    }
+
+    triggerDefaultAction("smile");
+    initialMotionStarted = false;
+    return false;
+  }
+
+  function startRandomMotionLoop(skipInitialMotion) {
+    prepareMotionRuntime();
+
+    if (!skipInitialMotion) {
+      if (motionList.length > 0 && !usingDefaultMotions) {
+        playRandomMotionOnce(3);
+      } else {
+        triggerDefaultAction("smile");
+      }
+    }
+
+    function scheduleNext() {
+      if (motionTimer) {
+        clearTimeout(motionTimer);
+      }
+
+      const delay = defaultIdleEnabled
+              ? (8500 + Math.floor(Math.random() * 6500))
+              : (6000 + Math.floor(Math.random() * 6000));
+
+      motionTimer = setTimeout(async function() {
+        if (defaultIdleEnabled) {
+          triggerDefaultAction(pickRandom(["smile", "nod", "look", "blink"]));
+          await applyRandomExpression();
+        } else {
+          await playRandomMotionOnce();
+        }
+        scheduleNext();
+      }, delay);
+    }
+
+    scheduleNext();
+  }
+
+  async function main() {
+    const t0 = Date.now();
+    LOG.i(M.RENDER, "开始加载模型",
+      "url=" + (modelUrl || "(空)") +
+      " dw=" + designW + " dh=" + designH +
+      " quality=" + renderQuality + " fps=" + targetFps +
+      " touch=" + interactiveEnabled + " autoPos=" + autoPositionMode +
+      " watermark=" + (watermarkVisible ? "显示" : "隐藏"));
+
+    if (!modelUrl) {
+      showMsg("Live2D model path is empty");
+      return;
+    }
+
+    await loadScriptAny([
+      "file:///android_asset/live2d/runtime/pixi.min.js",
+      "file:///sdcard/MikuCarLauncher/live2d/runtime/pixi.min.js",
+      "https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js",
+      "https://unpkg.com/pixi.js@6.5.10/dist/browser/pixi.min.js"
+    ]);
+    LOG.d(M.RENDER, "Pixi 运行库已加载", "t=" + (Date.now() - t0) + "ms");
+
+    try {
+      await loadScriptAny([
+        "file:///android_asset/live2d/runtime/live2d.min.js",
+        "file:///sdcard/MikuCarLauncher/live2d/runtime/live2d.min.js",
+        "https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"
+      ]);
+    } catch (e) {
+      LOG.w(M.RENDER, "Cubism2 运行库未加载（可选，通常不影响）", "err=" + (e && e.message));
+    }
+
+    await loadScriptAny([
+      "file:///android_asset/live2d/runtime/live2dcubismcore.min.js",
+      "file:///sdcard/MikuCarLauncher/live2d/runtime/live2dcubismcore.min.js",
+      "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
+    ]);
+
+    await loadScriptAny([
+      "file:///android_asset/live2d/runtime/pixi-live2d-display.min.js",
+      "file:///android_asset/live2d/runtime/index.min.js",
+      "file:///sdcard/MikuCarLauncher/live2d/runtime/pixi-live2d-display.min.js",
+      "file:///sdcard/MikuCarLauncher/live2d/runtime/index.min.js",
+      "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js",
+      "https://unpkg.com/pixi-live2d-display@0.4.0/dist/index.min.js"
+    ]);
+
+    if (!window.PIXI || !PIXI.live2d || !PIXI.live2d.Live2DModel) {
+      throw new Error("Live2D runtime is not ready");
+    }
+
+    const baseDeviceRatio = window.devicePixelRatio || 1;
+    const rendererResolution = Math.max(0.5, Math.min(3.0, baseDeviceRatio * renderQuality));
+
+    app = new PIXI.Application({
+      view: document.createElement("canvas"),
+      width: window.innerWidth,
+      height: window.innerHeight,
+      transparent: true,
+      autoDensity: true,
+      resolution: rendererResolution,
+      antialias: renderQuality >= 0.9
+    });
+
+    try {
+      app.ticker.maxFPS = targetFps;
+      app.ticker.minFPS = Math.min(12, targetFps);
+    } catch (e) {}
+
+    const stage = document.getElementById("stage");
+    stage.innerHTML = "";
+    stage.appendChild(app.view);
+    applyNightDimFilter();
+
+    // v0.13.35: JavaScript timers can keep running while the WebGL canvas is blank.
+    // Treat a real WebGL context loss as a renderer failure and ask Android to rebuild.
+    try {
+      app.view.addEventListener("webglcontextlost", function(event) {
+        try { event.preventDefault(); } catch (e) {}
+        try {
+          if (window.MikuLive2DAndroid && window.MikuLive2DAndroid.reportError) {
+            window.MikuLive2DAndroid.reportError("webgl-context-lost");
+          }
+        } catch (e) {}
+      }, false);
+      app.view.addEventListener("webglcontextrestored", function() {
+        sendAndroidHeartbeat("webgl-context-restored");
+      }, false);
+    } catch (e) {}
+
+    const Live2DModel = PIXI.live2d.Live2DModel;
+    const tLoad = Date.now();
+    model = await Live2DModel.from(modelUrl, {
+      autoInteract: false,
+      // v0.13.38: keep the shared Live2D ticker detached until the first random motion
+      // has been loaded and reserved. Otherwise the model can render its raw/default pose
+      // for a visible moment before playRandomMotionOnce() gets control.
+      autoUpdate: false
+    });
+    LOG.i(M.RENDER, "模型实例化完成",
+      "耗时=" + (Date.now() - tLoad) + "ms 总耗时=" + (Date.now() - t0) + "ms " +
+      "rawW=" + Math.round(model.width || 0) + " rawH=" + Math.round(model.height || 0));
+
+    hideMsg();
+
+    try {
+      if (model.anchor) model.anchor.set(0.5, 0.62);
+    } catch (e) {}
+
+    rawModelWidth = Math.max(1, model.width || 1);
+    rawModelHeight = Math.max(1, model.height || 1);
+
+    applyLayout();
+
+    // Do not add the model to app.stage before this await completes. The canvas may already
+    // be visible, but the Live2D model itself remains absent until a random motion is ready.
+    await startInitialRandomMotionBeforeFirstFrame();
+
+    app.stage.addChild(model);
+    try {
+      model.autoUpdate = true;
+    } catch (e) {}
+
+    updateLive2DMask();
+    sendAndroidHeartbeat("loaded");
+
+    // v63：安装触摸交互并首次上报模型包围盒。
+    // 必须在模型加入 stage 之后，否则 getBounds() 拿不到有效值。
+    installInteraction();
+
+    // v1.2.0（R2）：自动定位模式下，把模型落在「屏幕水平居中、垂直 62%」，
+    // 这是横屏车机上比较舒服的位置；随后完全由用户拖拽决定。
+    if (autoPositionMode) {
+      model.x = window.innerWidth * 0.5;
+      model.y = window.innerHeight * 0.62;
+      manualPositioned = true;   // 立即锁定，禁止待机逻辑回弹
+    }
+    modelCenterXDesign = model.x / stageScaleX();
+    modelCenterYDesign = model.y / stageScaleY();
+    reportHitArea(true);
+
+    // 同步触摸接管状态（URautoPos 模式下也是接管）
+    touchManaged = interactiveEnabled;
+
+    // 包围盒会随待机动作/呼吸轻微变化，低频兜底刷新，
+    // 保证 Android 侧的命中区域不会因为模型微动而失真。
+    setInterval(function() { reportHitArea(false); }, 900);
+
+    window.addEventListener("resize", function() {
+      app.renderer.resize(window.innerWidth, window.innerHeight);
+      applyLayout();
+      updateLive2DMask();
+      applyNightDimFilter();
+      reportHitArea(true);
+    });
+
+    startRandomMotionLoop(initialMotionStarted);
+
+    // v1.2.0（R6）：安装水印压制器。必须在 model.internalModel 就绪之后、
+    // 渲染开始之前完成，否则第一帧会闪出水印。
+    installWatermarkSuppressor();
+    forceWatermarkOff();
+
+    // v1.3.0：加载完成汇总。这条是排查「模型没显示」时的第一条线索，
+    // 一眼就能看出尺寸/位置/水印/触摸四项状态是否正常。
+    {
+      const b = computeModelBounds();
+      LOG.i(M.RENDER, "加载完成",
+        "总耗时=" + (Date.now() - t0) + "ms " +
+        "scale=" + (model.scale.x || 0).toFixed(3) + " " +
+        "pos=(" + Math.round(model.x) + "," + Math.round(model.y) + ") " +
+        "bounds=" + (b ? [b.l, b.t, b.r, b.b].map(Math.round).join(",") : "无") + " " +
+        "水印=" + (watermarkVisible ? "显示" : "已隐藏") + " " +
+        "触摸=" + interactiveEnabled);
+    }
+
+    let lastRendererHeartbeatAt = 0;
+    app.ticker.add(function(delta) {
+      elapsedSec += delta / 60.0;
+      // 放在模型自身 update 后做参数覆盖，这样眨眼/默认待机更容易生效。
+      updateDefaultIdle();
+
+      // v1.2.0：动作到期回收 + 水印压制。
+      // 必须放在本帧所有姿态参数写入之后，否则会被模型自带动作覆盖。
+      updateActiveAction();
+      if (!watermarkVisible && WATERMARK_SUPPRESS_ENABLED) {
+        forceWatermarkOff();
+      }
+
+      // v1.5.0：抓住脉冲 + 边缘吸附补间。
+      // 放在姿态参数之后、心跳之前：脉冲改的是 scale（不影响参数求值），
+      // 吸附改的是 x（必须在命中区上报前完成，否则热区会落后一帧）。
+      applyGrabPulse();
+      updateEdgeSnap();
+
+      // Renderer heartbeat: only report healthy from the Pixi render ticker, and verify
+      // that the underlying WebGL context has not been lost. A plain setInterval is not
+      // sufficient because it continues firing on some ROMs even when the canvas is blank.
+      const now = Date.now();
+      if (now - lastRendererHeartbeatAt >= 2000) {
+        let contextLost = false;
+        try {
+          const gl = app && app.renderer && app.renderer.gl;
+          contextLost = !!(gl && gl.isContextLost && gl.isContextLost());
+        } catch (e) {}
+        if (contextLost) {
+          try {
+            if (window.MikuLive2DAndroid && window.MikuLive2DAndroid.reportError) {
+              window.MikuLive2DAndroid.reportError("webgl-context-lost-poll");
+            }
+          } catch (e) {}
+        } else {
+          lastRendererHeartbeatAt = now;
+          sendAndroidHeartbeat("render-tick");
+        }
+      }
+    });
+  }
+
+  main().catch(function(e) {
+    const errorText = (e && e.message ? e.message : String(e || "未知错误"));
+    try {
+      if (window.MikuLive2DAndroid && window.MikuLive2DAndroid.reportError) {
+        window.MikuLive2DAndroid.reportError(errorText);
+      }
+    } catch (bridgeError) {}
+    showMsg("Live2D加载失败：" + errorText);
+    document.getElementById("stage").innerHTML = "";
+  });
+})();
+</script>
+</body>
+</html>
