@@ -309,7 +309,7 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
-            windowFlags(false),
+            baseWindowFlags(),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -323,6 +323,10 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
+
+        // 见 makeRenderWindowPassThrough 的注释：优先用「空触摸区域」替代
+        // FLAG_NOT_TOUCHABLE，以绕开 Android 12+ 强加的 0.8 不透明上限。
+        makeRenderWindowPassThrough(params)
 
         try {
             windowManager.addView(container, params)
@@ -692,6 +696,53 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         else baseWindowFlags() or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
 
     /**
+     * v1.6.0：让渲染窗口「既不接收触摸、又不受 0.8 不透明上限约束」。
+     *
+     * 背景（真机实测，小米平板 Android 13 / SDK 33）：
+     * Android 12 起，系统对带 FLAG_NOT_TOUCHABLE 的**系统悬浮窗**强制压低不透明度。
+     * logcat 里 WindowManager 的原话是：
+     *
+     *   App com.live2d.overlay has a system alert window (type = 2038) with
+     *   FLAG_NOT_TOUCHABLE and LayoutParams.alpha = 1.00 > 0.80, setting alpha to 0.80
+     *   to let touches pass through (if this is isn't desirable, remove flag
+     *   FLAG_NOT_TOUCHABLE).
+     *
+     * dumpsys 里也能直接看到 `ty=APPLICATION_OVERLAY fmt=TRANSLUCENT alpha=0.8`，
+     * 而应用写入的是 1.0。这就是「整体透明度拉到 100% 仍然有点透明」的真正原因，
+     * 与模型自身 alpha 无关。
+     *
+     * 解法就用系统自己给的建议：**去掉 FLAG_NOT_TOUCHABLE**，改用
+     * 「可触摸窗口 + 空触摸区域」达到等效的穿透效果 —— 窗口仍然收不到任何触摸，
+     * 但它不再是「不可触摸窗口」，因此不受 0.8 上限约束。
+     *
+     * setTouchableRegion 是隐藏 API（公开 SDK 里没有），故走反射；
+     * 反射失败时退回 FLAG_NOT_TOUCHABLE —— 功能完全不受影响，只是仍有 0.8 上限。
+     *
+     * @return true = 已走新路径（可达到真正 100% 不透明）
+     */
+    private fun makeRenderWindowPassThrough(params: WindowManager.LayoutParams): Boolean {
+        // ── 已实测：应用层无法突破 0.8 不透明上限，故直接使用 FLAG_NOT_TOUCHABLE ──
+        //
+        // 曾尝试用「可触摸窗口 + 空触摸区域」绕开限制（系统日志自己给的建议），
+        // 但真机枚举 WindowManager.LayoutParams 的全部触摸相关成员后确认：
+        //   fields  = [FLAG_NOT_TOUCHABLE, FLAG_NOT_TOUCH_MODAL, FLAG_SPLIT_TOUCH,
+        //              FLAG_TOUCHABLE_WHEN_WAKING, FLAG_WATCH_OUTSIDE_TOUCH]
+        //   methods = []
+        // 即 Android 13 上**不存在** touchableRegion 字段，也没有 setTouchableRegion 方法
+        // （隐藏的也没有）→ 应用无法指定窗口触摸区域。
+        // 因此一旦去掉 FLAG_NOT_TOUCHABLE，全屏窗口就会吃掉整个桌面的触摸，方案不成立。
+        //
+        // 同时实测：`settings put secure maximum_obscuring_opacity_for_touch 1.0`
+        // **重启后仍然压制到 0.8**（该设置在本机 MIUI/HyperOS 上不生效）。
+        //
+        // 结论：在「全屏穿透式悬浮窗」这个形态下，80% 是本机的硬上限。
+        // 若必须 100%，只能改用「把模型渲染进可触摸的包围盒窗口」——
+        // 代价是模型包围盒矩形内的触摸不再穿透到桌面。详见 docs/01_迭代清单.md。
+        params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        return false
+    }
+
+    /**
      * 渲染容器。
      *
      * 触摸路由已外移到独立的捕获窗口（见 syncTouchCatcher），
@@ -941,6 +992,18 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     private fun detachOverlay() {
         mainHandler.removeCallbacks(watchdog)
         destroyWebView()
+        // ★ 捕获窗口必须在这里一并移除。
+        //
+        // 此前只移除渲染窗口，导致捕获窗口泄漏：Service 停止后进程通常仍然存活
+        // （Android 保留缓存进程），窗口不会随 token 消失，于是残留窗口继续可触摸，
+        // 而它的 OnTouchListener 闭包指向**已销毁的旧 Service 实例**（webView 已为 null）
+        // —— 触摸被吞掉却什么都不做。
+        //
+        // 多次启停后残留窗口不断累积，模型移动时撞进残留窗口的矩形，
+        // 整个手势就被死窗口接管（Android 在 ACTION_DOWN 时绑定手势序列），
+        // 表现为「拖动几次之后就拖不动了」。
+        // 实测：3 轮「停→启」后 dumpsys 里累积出 5 个捕获窗口。
+        removeTouchCatcher()
         rootView?.let { v ->
             try {
                 windowManager.removeView(v)
