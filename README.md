@@ -56,15 +56,40 @@ export ANDROID_HOME='C:\Android\Sdk'
 
 ## 接手第一件事
 
-工作区**尚无 git 仓库**，改动不可回退。建议先：
+✅ **版本控制已建立**（原 P0-1 已完成）。
+
+| 项 | 值 |
+|---|---|
+| 基线提交 | `d488d78` · `chore: 接手 v1.5.0 基线` |
+| 分支 | `main` |
+| 追踪 | 50 个文件 / 8.0 MB（`.git` 6.5 MB） |
+| 建立日期 | 2026-10-02 |
 
 ```bash
-git init
-printf 'src/Live2DOverlay/app/build/\nsrc/Live2DOverlay/.gradle/\nsrc/Live2DOverlay/local.properties\n_archive/\n' > .gitignore
-git add -A && git commit -m "chore: 接手 v1.5.0 基线"
+# 若 git 不在 PATH 里，用绝对路径（本机 Git 2.55.0 装在 C:\Program Files\Git）
+GIT="C:/Program Files/Git/cmd/git.exe"
+
+"$GIT" log --oneline --stat      # 看历史
+"$GIT" status                    # 看改动
+"$GIT" checkout -- <文件>         # 回退单个文件（已实测字节级还原）
 ```
 
-随后从 [`docs/01_迭代清单.md`](docs/01_迭代清单.md) §二 的 **P0 阻塞项**开始。
+**排除项**（[`.gitignore`](.gitignore)）：`_archive/`（170 M 可再生产物）、`local.properties`（机器相关）、
+`app/build/`、`.gradle/`、`.kotlin/`。
+
+**行尾策略**（[`.gitattributes`](.gitattributes)）：`* -text`，**禁止任何行尾转换** ——
+本仓库刻意混合了 LF（`live2d_decor.html`，2414 行）与 CRLF（`*.kt`），
+转换会让「构建产物 MD5 比对」这类字节级校验习惯失效。
+
+> 提交身份当前是仓库本地占位值 `DSH Agent <dsh-agent@localhost>`（本机无全局 git 身份）。
+> 换成你自己的：
+> ```bash
+> "$GIT" config --local user.name  "你的名字"
+> "$GIT" config --local user.email "你的邮箱"
+> "$GIT" commit --amend --reset-author --no-edit
+> ```
+
+随后从 [`docs/01_迭代清单.md`](docs/01_迭代清单.md) §二 的 **P0 阻塞项**开始（P0-1 已划掉）。
 
 ---
 
