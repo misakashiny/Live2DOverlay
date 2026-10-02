@@ -897,6 +897,7 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
 
     /** 依次尝试「模型目录旁的档案」→「assets 内置档案」；都读不到返回 null */
     private fun loadModelProfileJson(): String? {
+        // 1) 模型目录旁的档案（随模型走，放 /sdcard 上可热改）
         try {
             val mp = config.modelPath
             if (mp.startsWith("file://")) {
@@ -904,23 +905,51 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 val f = java.io.File(modelFile.parentFile, "model-profile.json")
                 if (f.isFile) {
                     val text = f.readText()
-                    L2DLog.i(L2DLog.Mod.MOTION, "使用模型目录内的档案",
+                    if (isValidProfile(text)) {
+                        L2DLog.i(L2DLog.Mod.MOTION, "使用模型目录内的档案",
+                            "path=${f.absolutePath} bytes=${text.length}")
+                        return text
+                    }
+                    L2DLog.w(L2DLog.Mod.MOTION, "模型目录内的档案无效，回退内置档案",
                         "path=${f.absolutePath} bytes=${text.length}")
-                    return text
                 }
             }
         } catch (t: Throwable) {
             L2DLog.w(L2DLog.Mod.MOTION, "读取模型目录档案失败", "err=${t.javaClass.simpleName}")
         }
+        // 2) assets 内置档案
         return try {
             val text = assets.open("live2d/model-profile.json")
                 .bufferedReader().use { it.readText() }
-            L2DLog.i(L2DLog.Mod.MOTION, "使用内置模型档案", "bytes=${text.length}")
-            text
+            if (isValidProfile(text)) {
+                L2DLog.i(L2DLog.Mod.MOTION, "使用内置模型档案", "bytes=${text.length}")
+                text
+            } else {
+                L2DLog.w(L2DLog.Mod.MOTION, "内置模型档案无效，沿用页面内置动作库",
+                    "bytes=${text.length}")
+                null
+            }
         } catch (t: Throwable) {
             L2DLog.w(L2DLog.Mod.MOTION, "内置模型档案缺失，沿用页面内置动作库",
                 "err=${t.javaClass.simpleName}")
             null
+        }
+    }
+
+    /**
+     * 档案结构校验：必须是 JSON 对象，且 `actions` 为非空数组。
+     *
+     * ★ 这一步不能省。若不校验就直接 `evaluateJavascript`，非法 JSON 会让**整段脚本**
+     * 解析失败 —— 页面里的 try/catch 根本不会执行，于是「已降级到内置动作库」
+     * 这件事发生了却没有任何日志，排查时完全看不到线索（真机实测踩到）。
+     */
+    private fun isValidProfile(text: String): Boolean {
+        return try {
+            val o = org.json.JSONObject(text)
+            val actions = o.optJSONArray("actions")
+            actions != null && actions.length() > 0
+        } catch (t: Throwable) {
+            false
         }
     }
 
