@@ -1350,11 +1350,27 @@
 
   /** Android → 页面：向引擎投递一条消息（后续情绪引擎用） */
   window.__mikuLive2DSoullinkMessage = function(text) {
-    if (!soullinkReady || !soullinkRuntime) return false;
+    if (!soullinkReady || !soullinkRuntime) {
+      LOG.w(M.AI, "Soullink 未就绪，消息已丢弃", "ready=" + soullinkReady);
+      return false;
+    }
     try {
-      const intent = soullinkRuntime.sendMessage(String(text || ""), performance.now() / 1000);
-      LOG.i(M.AI, "Soullink 已接收消息",
-        "emotion=" + (intent && intent.emotion ? intent.emotion : "?"));
+      const msg = String(text || "");
+      const intent = soullinkRuntime.sendMessage(msg, performance.now() / 1000);
+      // v1.7.4：把分类结果与投递后的 VAD 一起打出来 ——
+      // 这是验收「消息 → 分类 → VAD → 表情」闭环的唯一观测点。
+      const snap = soullinkRuntime.getSnapshot ? soullinkRuntime.getSnapshot() : null;
+      const vad = snap && snap.vad ? snap.vad : null;
+      LOG.i(M.AI, "Soullink 收到消息",
+        "text=" + msg +
+        " → emotion=" + (intent && intent.emotion ? intent.emotion : "?") +
+        " variant=" + (intent && intent.variant ? intent.variant : "?") +
+        " intensity=" + (intent && intent.intensity != null ? intent.intensity : "?") +
+        " tags=" + (intent && intent.contextTags ? intent.contextTags.join("/") : "?") +
+        (vad ? " | 目标VAD V=" + vad.target.valence.toFixed(2) +
+               " A=" + vad.target.arousal.toFixed(2) +
+               " D=" + vad.target.dominance.toFixed(2) +
+               " 当前=" + vad.dominantEmotion : ""));
       return true;
     } catch (e) {
       LOG.w(M.AI, "Soullink 消息投递失败", "err=" + (e && e.message));

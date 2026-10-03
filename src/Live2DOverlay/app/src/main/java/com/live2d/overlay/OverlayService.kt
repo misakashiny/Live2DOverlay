@@ -124,6 +124,14 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         const val ACTION_REPUSH_PERSONA = "com.live2d.overlay.action.REPUSH_PERSONA"
 
+        /**
+         * v1.7.4：向 Soullink 引擎投递一条消息（验收「消息 → 情绪」闭环）。
+         *
+         * 单独开通道而不是复用调试口 —— 这是正式能力，release 下也要能用
+         * （后续接 LLM 时，对话文本就走这条路进引擎）。
+         */
+        const val ACTION_SOULLINK_MESSAGE = "com.live2d.overlay.action.SOULLINK_MESSAGE"
+
         /** v1.4.0：仅更新窗口透明度，不重载页面（Bug-A 修复配套） */
         const val ACTION_SET_ALPHA = "com.live2d.overlay.action.SET_ALPHA"
 
@@ -280,6 +288,20 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
             }
             ACTION_REPUSH_PERSONA -> {
                 pushPersonaToPage()
+                return START_STICKY
+            }
+            ACTION_SOULLINK_MESSAGE -> {
+                val text = intent.getStringExtra("text")
+                if (text.isNullOrBlank()) {
+                    L2DLog.w(L2DLog.Mod.AI, "Soullink 消息为空，已忽略")
+                } else {
+                    // 转义后拼进 JS 字符串字面量（消息是用户输入，不能直接拼）
+                    val safe = text.replace("\\", "\\\\").replace("'", "\\'")
+                        .replace("\n", " ").replace("\r", " ")
+                    evalJsQuiet(
+                        "window.__mikuLive2DSoullinkMessage && window.__mikuLive2DSoullinkMessage('$safe')")
+                    L2DLog.i(L2DLog.Mod.AI, "Soullink 消息已投递", "chars=${text.length} text=$text")
+                }
                 return START_STICKY
             }
             else -> {

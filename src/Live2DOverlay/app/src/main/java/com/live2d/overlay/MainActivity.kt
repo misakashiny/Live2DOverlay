@@ -716,7 +716,40 @@ class MainActivity : AppCompatActivity() {
             pushLiveUpdate()
         }
 
+        // v1.7.4：情绪引擎测试入口。
+        // 验收「消息 → 分类 → VAD → 表情」闭环，也是后续接 LLM 的调试口。
+        // 预设 4 条覆盖分类器的不同分支（好消息→happy / 夸夸→shy / 生气→anger / 累→tired）。
+        // 之所以要预设按钮：adb 的 `input text` **打不了中文**，靠输入框没法自动化验收。
+        binding.btnSoullinkSend.setOnClickListener {
+            sendSoullinkMessage(binding.etSoullinkMsg.text?.toString())
+        }
+        binding.btnEmoHappy.setOnClickListener { sendSoullinkMessage("好消息！项目成功通过了") }
+        binding.btnEmoShy.setOnClickListener { sendSoullinkMessage("你真可爱，好喜欢你") }
+        binding.btnEmoAnger.setOnClickListener { sendSoullinkMessage("这也太离谱了，我很生气") }
+        binding.btnEmoTired.setOnClickListener { sendSoullinkMessage("今天好累，压力好大") }
+
         refreshPersonaView()
+    }
+
+    /** v1.7.4：把一条消息投给 Soullink 引擎，用于验收「消息 → 情绪」闭环 */
+    private fun sendSoullinkMessage(text: String?) {
+        if (text.isNullOrBlank()) {
+            toast("消息为空")
+            return
+        }
+        if (!config.soullinkEnabled) {
+            toast("请先开启 Soullink 情绪引擎")
+            return
+        }
+        if (!OverlayService.isRunning) {
+            toast("请先启用悬浮窗")
+            return
+        }
+        safeStartService(Intent(this, OverlayService::class.java).apply {
+            setAction(OverlayService.ACTION_SOULLINK_MESSAGE)
+            putExtra("text", text)
+        })
+        toast("已投递：$text")
     }
 
     /** 刷新「当前角色」那一行 */
