@@ -216,6 +216,9 @@
   // v1.5.0：边缘吸附（URL 带 snap=0 关闭）
   let edgeSnapEnabled = params.get("snap") !== "0";
 
+  // v1.7.3（实验）：Soullink Emotion 引擎开关。默认关 —— 见 installSoullinkTicker 上方注释。
+  let soullinkEnabled = params.get("soullink") === "1";
+
   // v1.5.0：「抓住」脉冲反馈的时间窗口（秒）
   let grabPulseStartSec = -1;
   let grabPulseUntilSec = -1;
@@ -1220,6 +1223,151 @@
     return ok;
   };
 
+  // ==================================================================
+  // v1.7.3（实验）：Soullink Emotion 引擎接入
+  //
+  // 目的：用第三方引擎（VAD 连续情绪 + FACS/AU + 分层混音 + Idle 调度）
+  //       替换本项目自建的「6 维离散情绪 + 关键帧动画」。
+  //       仓库：github.com/nanlingyin/soullink-emotion-sdk（Apache-2.0）
+  //
+  // ★★ 为什么必须 opt-in（默认关）★★
+  //   参数审计（reference/soullink/ 里的 conflict 检查）证明：两套会写**同一批 17 个参数** ——
+  //     · 8 个离散动作参数：Param125 / 130 / 131 / 132 / 133 / 134 / 135 / 136
+  //     · 9 个连续参数    ：ParamAngleX/Y/Z / ParamBodyAngleX / ParamBreath /
+  //                         ParamEyeLOpen / ParamEyeROpen / ParamMouthForm / ParamMouthOpenY
+  //   同时开两套必然逐帧互相覆盖 —— 就是 docs/00 §五「位置所有权必须唯一」那类坑。
+  //   所以：Soullink 一旦就绪，**内置 idle 与动作库全部让位**（见下面两处 return）。
+  //
+  // ★★ 为什么 profile 由 Android 注入，而不是页面 fetch ★★
+  //   engine 的 loadModelProfile() 内部用 fetch()，在 file:// 下报 "unknown scheme"
+  //   （真机已验证）—— 与本项目 v1.7.0 踩过的是同一个坑。
+  //   复用既有的「Kotlin 读文件 + evaluateJavascript 注入」方案。
+  // ==================================================================
+
+  let soullinkRuntime = null;
+  let soullinkReady = false;
+  let soullinkLastSec = 0;
+  let soullinkFrames = 0;
+
+  /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
+  function loadSoullinkEngine() {
+    return new Promise(function(resolve, reject) {
+      if (window.SoullinkEmotion) return resolve(window.SoullinkEmotion);
+      const s = document.createElement("script");
+      s.src = "runtime/soullink-engine.iife.js";
+      s.onload = function() { resolve(window.SoullinkEmotion); };
+      s.onerror = function() { reject(new Error("soullink-engine.iife.js 加载失败")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  /**
+   * Android → 页面：注入 soullink profile 并启动引擎。
+   * profile 由 Kotlin 读取 assets/live2d/soullink.profile.json 后传进来。
+   */
+  window.__mikuLive2DStartSoullink = function(profile) {
+    if (!soullinkEnabled) {
+      LOG.i(M.AI, "Soullink 未启用（soullink=0），忽略启动请求");
+      return false;
+    }
+    if (!profile || typeof profile !== "object" || !profile.parameterMap) {
+      LOG.w(M.AI, "Soullink profile 无效，引擎未启动");
+      return false;
+    }
+    if (soullinkReady) return true;
+
+    loadSoullinkEngine().then(function(lib) {
+      try {
+        soullinkRuntime = new lib.SoullinkRuntime({
+          profile: profile,
+          motionStyle: Object.assign({}, lib.motionStylePresets.natural, { seed: 20260717 })
+        });
+
+        // ★ 让位：清空内置关键帧动画，避免与引擎抢同一批参数
+        ANIMATIONS = [];
+        animById = Object.create(null);
+        activeOneShot = null;
+        activeLoops.length = 0;
+
+        soullinkReady = true;
+        soullinkLastSec = performance.now() / 1000;
+        LOG.i(M.AI, "Soullink 引擎已启动",
+          "modelId=" + profile.modelId +
+          " parameterMap=" + Object.keys(profile.parameterMap || {}).length +
+          " privateEmotion=" + Object.keys(profile.privateEmotionMap || {}).length +
+          " idleConfig=" + Object.keys(profile.idleConfig || {}).length +
+          " 内置动画已清空=" + ANIMATIONS.length);
+      } catch (e) {
+        LOG.e(M.AI, "Soullink 引擎启动失败", "err=" + (e && e.message));
+      }
+    }).catch(function(e) {
+      LOG.e(M.AI, "Soullink 引擎脚本加载失败", "err=" + (e && e.message));
+    });
+    return true;
+  };
+
+  /** 每帧推进引擎并落地参数。由 beforeModelUpdate 调用。 */
+  function tickSoullink() {
+    if (!soullinkReady || !soullinkRuntime) return;
+    const nowSec = performance.now() / 1000;
+    const dt = Math.max(0, Math.min(0.25, nowSec - soullinkLastSec));
+    soullinkLastSec = nowSec;
+    try {
+      const snap = soullinkRuntime.update(nowSec, dt);
+      const ps = snap.live2dParams || {};
+      for (const k in ps) setParam(k, ps[k]);
+      soullinkFrames++;
+      // 每 300 帧（约 5 秒）汇报一次，便于真机验收；平时不刷日志
+      if (soullinkFrames % 300 === 1) {
+        LOG.d(M.AI, "Soullink 运行中",
+          "帧=" + soullinkFrames + " 参数=" + Object.keys(ps).length +
+          " 情绪=" + (snap.vad ? snap.vad.dominantEmotion : "?") +
+          " V=" + (snap.vad ? snap.vad.current.valence.toFixed(2) : "?") +
+          " A=" + (snap.vad ? snap.vad.current.arousal.toFixed(2) : "?") +
+          " D=" + (snap.vad ? snap.vad.current.dominance.toFixed(2) : "?"));
+      }
+    } catch (e) {
+      // 出错即停用，避免每帧刷屏
+      soullinkReady = false;
+      LOG.e(M.AI, "Soullink 更新异常，已停用", "err=" + (e && e.message));
+    }
+  }
+
+  /** 把引擎帧写入挂到 beforeModelUpdate —— 必须在参数求值之后、渲染之前 */
+  function installSoullinkTicker() {
+    if (!model || !model.internalModel) return;
+    if (!soullinkEnabled) {
+      LOG.i(M.AI, "Soullink 未启用，使用内置 idle + 关键帧动画");
+      return;
+    }
+    try {
+      model.internalModel.on("beforeModelUpdate", function() { tickSoullink(); });
+      LOG.i(M.AI, "Soullink 帧写入器已安装", "hook=beforeModelUpdate（等 Android 注入 profile）");
+    } catch (e) {
+      LOG.e(M.AI, "Soullink 帧写入器安装失败", "err=" + (e && e.message));
+    }
+  }
+
+  /** Android → 页面：向引擎投递一条消息（后续情绪引擎用） */
+  window.__mikuLive2DSoullinkMessage = function(text) {
+    if (!soullinkReady || !soullinkRuntime) return false;
+    try {
+      const intent = soullinkRuntime.sendMessage(String(text || ""), performance.now() / 1000);
+      LOG.i(M.AI, "Soullink 已接收消息",
+        "emotion=" + (intent && intent.emotion ? intent.emotion : "?"));
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "Soullink 消息投递失败", "err=" + (e && e.message));
+      return false;
+    }
+  };
+
+  window.__mikuLive2DSoullinkStatus = function() {
+    return JSON.stringify({
+      enabled: soullinkEnabled, ready: soullinkReady, frames: soullinkFrames
+    });
+  };
+
   let activeAction = null;          // 当前正在播放的自带动作
   let activeActionStartSec = -1;
   let activeActionUntilSec = -1;
@@ -1392,6 +1540,11 @@
   /** 点击模型：随机播一个模型自带动作/表情（R3） */
   async function reactToTap() {
     try {
+      // v1.7.3：Soullink 启用时，点击动作也交给引擎 ——
+      // 8 个离散动作参数（Param125/130-136）已由 privateEmotionMap 接管，
+      // 这里再播一次内置动作会与引擎抢所有权。
+      if (soullinkReady) return false;
+
       // v1.7.2：人设若定义了 onTap 动画槽，优先播它（关键帧动画表现力更好）；
       // 没定义 / 播失败则回落到下面原有的 actions 路径 —— 保证行为不退化。
       if (playPersonaSlot("onTap")) return true;
@@ -2344,6 +2497,12 @@
     angleZ += gazeCurrentX * 7;
     bodyX += gazeCurrentX * 8;
 
+    // ★ v1.7.3：Soullink 就绪后，参数所有权整体交给引擎，内置 idle 全部让位。
+    //   两套会写同一批 17 个参数（见 installSoullinkTicker 上方注释），
+    //   同时写必然逐帧互相覆盖。让位是唯一正确的做法。
+    //   注意：只让位「参数」，模型位置（model.x/y）仍由下方容器级逻辑管 —— 引擎不碰位置。
+    if (soullinkReady) return;
+
     if (defaultActionStartSec >= 0) {
       const p = clamp((elapsedSec - defaultActionStartSec) / Math.max(0.01, defaultActionDurationSec), 0, 1);
       const e = pulse(p);
@@ -2357,7 +2516,13 @@
       } else if (defaultActionKind === "smile") {
         setParamAny(["ParamMouthForm", "PARAM_MOUTH_FORM"], 0.8 * e);
         setParamAny(["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y"], 0.18 + 0.16 * e);
-        setParamAny(["ParamEyeSmile", "PARAM_EYE_SMILE"], 0.75 * e);
+        // v1.7.3（Bug-019）：原写的是 ParamEyeSmile —— **本模型没有这个参数**。
+        // 正确名是 ParamEyeLSmile / ParamEyeRSmile（cdi3.json 里是「左眼　微笑」「右眼　微笑」）。
+        // Live2D 的 setParam 对不存在的参数不报错、只是什么都不做，所以这是**静默失效**：
+        // 「微笑」动作的嘴部一直生效、**眼部一直没生效**。
+        // 用 cdi3.json 反查参数存在性才发现 —— 教训同 docs/00 §五「不要假设参数名」。
+        setParamAny(["ParamEyeLSmile", "PARAM_EYE_L_SMILE"], 0.75 * e);
+        setParamAny(["ParamEyeRSmile", "PARAM_EYE_R_SMILE"], 0.75 * e);
       }
 
       if (p >= 1) {
@@ -2663,6 +2828,10 @@
     // v1.7.2：安装关键帧动画帧写入器。同样必须挂 beforeModelUpdate ——
     // 挂 ticker 会被参数求值覆盖（与上面水印压制同源的原因）。
     installAnimationTicker();
+
+    // v1.7.3（实验）：Soullink 引擎帧写入器。
+    // 未启用时它只打一条日志、不挂钩子 —— 现有行为完全不变。
+    installSoullinkTicker();
 
     // v1.3.0：加载完成汇总。这条是排查「模型没显示」时的第一条线索，
     // 一眼就能看出尺寸/位置/水印/触摸四项状态是否正常。

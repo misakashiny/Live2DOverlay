@@ -956,6 +956,8 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 pushModelProfileToPage()
                 // v1.7.2：人设必须在档案之后推送（人设的动画槽位引用档案里的动画 id）
                 pushPersonaToPage()
+                // v1.7.3：Soullink 引擎（未启用时这一步是空操作）
+                pushSoullinkToPage()
             }
 
             override fun onReceivedError(
@@ -1047,6 +1049,49 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         )
         L2DLog.i(L2DLog.Mod.AI, "人设已推送",
             "id=${p.id} name=${p.name} traits=${p.traits.size} bias=${p.emotionBias.size}")
+    }
+
+    /**
+     * v1.7.3（实验）：把 Soullink 模型档案注入页面并启动引擎。
+     *
+     * 复用「原生读文件 + 注入」方案的原因与上面完全相同：engine 的
+     * `loadModelProfile()` 内部用 `fetch()`，在 `file://` 下报 unknown scheme
+     * （真机已验证）—— 与本项目 v1.7.0 踩过的是同一个坑。
+     *
+     * **未启用时直接返回** —— 页面不会去加载那 133 KB 的引擎脚本，零开销。
+     */
+    private fun pushSoullinkToPage() {
+        if (!config.soullinkEnabled) {
+            L2DLog.i(L2DLog.Mod.AI, "Soullink 未启用，跳过（内置 idle + 关键帧动画接管）")
+            return
+        }
+        val wv = webView ?: return
+
+        val json = try {
+            assets.open("live2d/soullink.profile.json")
+                .bufferedReader().use { it.readText() }
+        } catch (t: Throwable) {
+            L2DLog.w(L2DLog.Mod.AI, "Soullink 档案缺失，引擎未启动", "err=${t.javaClass.simpleName}")
+            return
+        }
+
+        // 结构校验：没有 parameterMap 的话引擎起来也是空转
+        val mapSize = try {
+            org.json.JSONObject(json).optJSONObject("parameterMap")?.length() ?: 0
+        } catch (t: Throwable) {
+            0
+        }
+        if (mapSize <= 0) {
+            L2DLog.w(L2DLog.Mod.AI, "Soullink 档案无效（无 parameterMap），引擎未启动")
+            return
+        }
+
+        wv.evaluateJavascript(
+            "window.__mikuLive2DStartSoullink && window.__mikuLive2DStartSoullink($json)",
+            null
+        )
+        L2DLog.i(L2DLog.Mod.AI, "Soullink 档案已注入",
+            "bytes=${json.length} parameterMap=$mapSize")
     }
 
     /** 依次尝试「模型目录旁的档案」→「assets 内置档案」；都读不到返回 null */

@@ -244,6 +244,34 @@
                     android:layout_weight="1"
                     android:text="试播动画" />
             </LinearLayout>
+
+            <!-- v1.7.3（实验）：Soullink Emotion 引擎开关 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Soullink 情绪引擎（实验）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <Switch
+                    android:id="@+id/switch_soullink"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="开启后由第三方引擎接管情绪与动作（VAD 连续情绪 + FACS/AU + 分层混音 + Idle 调度）。★ 开启时内置待机与动作库会主动让位，避免两套抢同一批参数。默认关闭。改动需重载页面生效。"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- ============ 显示参数 ============ -->

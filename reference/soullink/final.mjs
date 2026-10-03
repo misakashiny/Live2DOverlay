@@ -1,0 +1,14 @@
+﻿import { readFile } from "node:fs/promises";
+import { validateModelProfile } from "@soullink-emotion/engine/internal";
+const sl = JSON.parse(await readFile("D:/AI Dsh/_ref/miku/miku/soullink.profile.json","utf8"));
+const v = validateModelProfile(sl);
+console.log("valid   =", v.valid);
+console.log("errors  =", JSON.stringify(v.errors));
+console.log("warnings=", JSON.stringify(v.warnings));
+const p = v.profile ?? sl;
+console.log("\n=== idleConfig（11 项：每个 FACS 通道的活动区间）===");
+for (const [k,val] of Object.entries(p.idleConfig ?? {})) console.log("  " + k.padEnd(14) + JSON.stringify(val));
+console.log("\n=== neutralParams（前 12 个）===");
+console.log("  " + Object.entries(p.neutralParams ?? {}).slice(0,12).map(([k,v])=>`${k}=${v}`).join("  "));
+console.log("\n=== parameterSmoothing（前 12 个）===");
+console.log("  " + Object.entries(p.parameterSmoothing ?? {}).slice(0,12).map(([k,v])=>`${k}=${v}`).join("  "));

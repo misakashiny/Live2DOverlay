@@ -41,6 +41,9 @@ class OverlayConfig(context: Context) {
         const val KEY_ACTIVE_PERSONA = "active_persona_id" // 当前角色人设 id
         const val DEF_ACTIVE_PERSONA = "miku"
 
+        // ---- v1.7.3（实验）----
+        const val KEY_SOULLINK_ENABLED = "soullink_enabled" // Soullink 情绪引擎开关
+
         // ---- 默认值（对齐车机横屏 2560x720 场景）----
         const val DEF_CENTER_X = 1448f
         const val DEF_CENTER_Y = 420f
@@ -170,6 +173,20 @@ class OverlayConfig(context: Context) {
         set(v) = prefs.edit().putString(KEY_ACTIVE_PERSONA, v).apply()
 
     /**
+     * v1.7.3（实验）：是否启用 Soullink Emotion 引擎接管情绪与动作。
+     *
+     * **默认关闭**。原因（详见 docs/33）：
+     *   参数审计证明 Soullink 与本项目内置实现会写**同一批 17 个参数**，
+     *   同时开必然逐帧互相覆盖（docs/00 §五「位置所有权必须唯一」那类坑）。
+     *   所以开启后页面会主动让位：内置 idle 与动作库全部停止写参数。
+     *
+     * 关闭时行为与 v1.7.2 完全一致 —— 这是刻意设计的可回退开关。
+     */
+    var soullinkEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SOULLINK_ENABLED, false)
+        set(v) = prefs.edit().putBoolean(KEY_SOULLINK_ENABLED, v).apply()
+
+    /**
      * 构造 WebView 页面 URL。
      *
      * 参数协议与原版 MikuCarLauncher 完全对齐，便于直接复用同一份 live2d_decor.html。
@@ -205,6 +222,8 @@ class OverlayConfig(context: Context) {
         sb.append("&cycle=").append(if (actionCycle) "1" else "0")
         sb.append("&fx=").append(if (tapEffect) "1" else "0")
         sb.append("&snap=").append(if (edgeSnap) "1" else "0")
+        // v1.7.3（实验）：Soullink 情绪引擎。默认 0 = 用内置实现。
+        sb.append("&soullink=").append(if (soullinkEnabled) "1" else "0")
         return sb.toString()
     }
 

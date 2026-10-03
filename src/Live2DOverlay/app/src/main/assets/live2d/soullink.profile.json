@@ -1,0 +1,502 @@
+{
+  "modelId": "miku_58dd29f8",
+  "displayName": "Miku",
+  "version": "1.0.0",
+  "modelPath": "/miku/miku.model3.json",
+  "sourceSignature": {
+    "modelDir": "miku",
+    "model3File": "miku.model3.json",
+    "cdi3File": "miku.cdi3.json",
+    "hash": "58dd29f810e5437301c9571bf89f86ee0e7ba45029edd193a4636862a5219d52",
+    "generatedAt": "2026-10-03T17:37:18.070Z"
+  },
+  "autoProfile": {
+    "provider": "heuristic",
+    "promptVersion": "soullink-profile-autogen-v3",
+    "generatedAt": "2026-10-03T17:37:18.070Z",
+    "notes": [
+      "Generated from model3/cdi3 parameter names.",
+      "LLM may refine this profile when OpenAI-compatible settings are enabled.",
+      "privateEmotionMap 由人工补齐（来源：8 个 exp3 文件的实际内容 + cdi3 显示名）",
+      "Param137(水印) 未纳入 privateEmotionMap —— 它是反向语义的显示开关，不是情绪，由宿主页面压制"
+    ]
+  },
+  "schemaVersion": 2,
+  "capabilities": {
+    "headControl": true,
+    "bodyControl": true,
+    "eyeBlink": true,
+    "eyeSmile": true,
+    "gazeControl": true,
+    "mouthOpen": true,
+    "mouthSmile": true,
+    "browControl": true,
+    "blush": true,
+    "tear": false,
+    "sweat": false,
+    "breath": true
+  },
+  "parameterMap": {
+    "eyeOpen": {
+      "targets": [
+        "ParamEyeROpen",
+        "ParamEyeLOpen"
+      ],
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1.2
+    },
+    "eyeBlinkL": {
+      "target": "ParamEyeROpen",
+      "mode": "subtract",
+      "scale": 1,
+      "min": 0,
+      "max": 1.2
+    },
+    "eyeBlinkR": {
+      "target": "ParamEyeLOpen",
+      "mode": "subtract",
+      "scale": 1,
+      "min": 0,
+      "max": 1.2
+    },
+    "eyeSquint": {
+      "targets": [
+        "ParamEyeROpen",
+        "ParamEyeLOpen"
+      ],
+      "mode": "subtract",
+      "scale": 0.22,
+      "min": 0,
+      "max": 1.2
+    },
+    "eyeSmile": {
+      "targets": [
+        "ParamEyeLSmile",
+        "ParamEyeRSmile"
+      ],
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1
+    },
+    "gazeX": {
+      "target": "ParamEyeBallX",
+      "mode": "set",
+      "scale": 1,
+      "min": -1,
+      "max": 1
+    },
+    "gazeY": {
+      "target": "ParamEyeBallY",
+      "mode": "set",
+      "scale": 1,
+      "min": -1,
+      "max": 1
+    },
+    "headX": {
+      "target": "ParamAngleX",
+      "mode": "set",
+      "scale": 30,
+      "min": -30,
+      "max": 30
+    },
+    "headY": {
+      "target": "ParamAngleY",
+      "mode": "set",
+      "scale": 30,
+      "min": -30,
+      "max": 30
+    },
+    "headZ": {
+      "target": "ParamAngleZ",
+      "mode": "set",
+      "scale": 30,
+      "min": -30,
+      "max": 30
+    },
+    "bodyX": {
+      "target": "ParamBodyAngleX",
+      "mode": "set",
+      "scale": 12,
+      "min": -12,
+      "max": 12
+    },
+    "bodyY": {
+      "target": "ParamBodyAngleY",
+      "mode": "set",
+      "scale": 12,
+      "min": -12,
+      "max": 12
+    },
+    "bodyZ": {
+      "target": "ParamBodyAngleZ",
+      "mode": "set",
+      "scale": 12,
+      "min": -12,
+      "max": 12
+    },
+    "mouthSmile": {
+      "target": "ParamMouthForm",
+      "mode": "set",
+      "scale": 1,
+      "min": -1,
+      "max": 1
+    },
+    "mouthFrown": {
+      "target": "ParamMouthForm",
+      "mode": "subtract",
+      "scale": 1,
+      "min": -1,
+      "max": 1
+    },
+    "mouthOpen": {
+      "target": "ParamMouthOpenY",
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1
+    },
+    "mouthPucker": {
+      "target": "Paramguzui",
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1
+    },
+    "browInnerUp": {
+      "targets": [
+        "ParamBrowLY",
+        "ParamBrowRY"
+      ],
+      "mode": "set",
+      "scale": 1,
+      "min": -1,
+      "max": 1
+    },
+    "browOuterUp": {
+      "targets": [
+        "ParamBrowLAngle",
+        "ParamBrowRAngle"
+      ],
+      "mode": "set",
+      "scale": 0.9,
+      "min": -1,
+      "max": 1
+    },
+    "browDown": {
+      "targets": [
+        "ParamBrowLForm",
+        "ParamBrowRForm"
+      ],
+      "mode": "set",
+      "scale": -0.85,
+      "min": -1,
+      "max": 1
+    },
+    "blush": {
+      "targets": [
+        "Param130"
+      ],
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1
+    },
+    "breath": {
+      "target": "ParamBreath",
+      "mode": "set",
+      "scale": 1,
+      "min": 0,
+      "max": 1
+    }
+  },
+  "idleConfig": {
+    "gazeX": [
+      -0.12,
+      0.12
+    ],
+    "gazeY": [
+      -0.06,
+      0.08
+    ],
+    "headX": [
+      -0.08,
+      0.08
+    ],
+    "headY": [
+      -0.04,
+      0.04
+    ],
+    "headZ": [
+      -0.05,
+      0.05
+    ],
+    "bodyX": [
+      -0.045,
+      0.045
+    ],
+    "bodyY": [
+      -0.014,
+      0.014
+    ],
+    "bodyZ": [
+      -0.055,
+      0.055
+    ],
+    "mouthSmile": [
+      0.02,
+      0.1
+    ],
+    "browInnerUp": [
+      0,
+      0.06
+    ],
+    "eyeOpen": [
+      0.9,
+      1
+    ]
+  },
+  "reactionBias": {
+    "shy": {
+      "blushMultiplier": 1.1,
+      "gazeAwayMultiplier": 1.05
+    },
+    "happy": {
+      "mouthSmileMultiplier": 1,
+      "eyeSmileMultiplier": 1
+    }
+  },
+  "neutralParams": {
+    "ParamEyeROpen": 1,
+    "ParamEyeLOpen": 1,
+    "ParamEyeLSmile": 0,
+    "ParamEyeRSmile": 0,
+    "ParamEyeBallX": 0,
+    "ParamEyeBallY": 0,
+    "ParamAngleX": 0,
+    "ParamAngleY": 0,
+    "ParamAngleZ": 0,
+    "ParamBodyAngleX": 0,
+    "ParamBodyAngleY": 0,
+    "ParamBodyAngleZ": 0,
+    "ParamMouthForm": 0,
+    "ParamMouthOpenY": 0,
+    "Paramguzui": 0,
+    "ParamBrowLY": 0,
+    "ParamBrowRY": 0,
+    "ParamBrowLAngle": 0,
+    "ParamBrowRAngle": 0,
+    "ParamBrowLForm": 0,
+    "ParamBrowRForm": 0,
+    "Param130": 0,
+    "ParamBreath": 0.5
+  },
+  "parameterSmoothing": {
+    "ParamEyeROpen": 26,
+    "ParamEyeLOpen": 26,
+    "ParamEyeLSmile": 26,
+    "ParamEyeRSmile": 26,
+    "ParamEyeBallX": 11,
+    "ParamEyeBallY": 11,
+    "ParamAngleX": 8,
+    "ParamAngleY": 8,
+    "ParamAngleZ": 8,
+    "ParamBodyAngleX": 6,
+    "ParamBodyAngleY": 6,
+    "ParamBodyAngleZ": 6,
+    "ParamMouthForm": 12,
+    "ParamMouthOpenY": 24,
+    "Paramguzui": 12,
+    "ParamBrowLY": 12,
+    "ParamBrowRY": 12,
+    "ParamBrowLAngle": 12,
+    "ParamBrowRAngle": 12,
+    "ParamBrowLForm": 12,
+    "ParamBrowRForm": 12,
+    "Param130": 4,
+    "ParamBreath": 5
+  },
+  "privateEmotionMap": {
+    "blush": {
+      "target": "Param130",
+      "category": "blush",
+      "emotions": [
+        "shy"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.1,
+          0.8
+        ],
+        "arousal": [
+          0.3,
+          1
+        ],
+        "dominance": [
+          -1,
+          -0.1
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.9,
+      "priority": 60,
+      "source": "manual",
+      "confidence": 0.95
+    },
+    "qqMode": {
+      "targets": [
+        "Param131",
+        "Param136"
+      ],
+      "emotions": [
+        "excited",
+        "happy"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.6,
+          1
+        ],
+        "arousal": [
+          0.6,
+          1
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.8,
+      "priority": 50,
+      "exclusiveGroup": "miku_pose",
+      "source": "manual",
+      "confidence": 0.9
+    },
+    "spin": {
+      "target": "Param125",
+      "emotions": [
+        "excited"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.5,
+          1
+        ],
+        "arousal": [
+          0.7,
+          1
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.75,
+      "priority": 55,
+      "exclusiveGroup": "miku_pose",
+      "source": "manual",
+      "confidence": 0.9
+    },
+    "leanForward": {
+      "target": "Param132",
+      "emotions": [
+        "curious",
+        "affectionate"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.15,
+          1
+        ],
+        "arousal": [
+          0.1,
+          0.9
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.7,
+      "priority": 40,
+      "exclusiveGroup": "miku_pose",
+      "source": "manual",
+      "confidence": 0.85
+    },
+    "scallion": {
+      "target": "Param133",
+      "emotions": [
+        "happy"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.55,
+          1
+        ],
+        "arousal": [
+          0.25,
+          0.9
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.7,
+      "priority": 30,
+      "exclusiveGroup": "miku_prop",
+      "source": "manual",
+      "confidence": 0.85
+    },
+    "sing": {
+      "target": "Param134",
+      "emotions": [
+        "happy",
+        "affectionate"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.45,
+          1
+        ],
+        "arousal": [
+          0.15,
+          0.8
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.7,
+      "priority": 30,
+      "exclusiveGroup": "miku_prop",
+      "source": "manual",
+      "confidence": 0.85
+    },
+    "heart": {
+      "target": "Param135",
+      "emotions": [
+        "affectionate",
+        "happy"
+      ],
+      "triggerMode": "any",
+      "vadRange": {
+        "valence": [
+          0.65,
+          1
+        ],
+        "arousal": [
+          0.05,
+          0.7
+        ]
+      },
+      "activeValue": 1,
+      "neutralValue": 0,
+      "intensity": 0.8,
+      "priority": 30,
+      "exclusiveGroup": "miku_prop",
+      "source": "manual",
+      "confidence": 0.9
+    }
+  }
+}

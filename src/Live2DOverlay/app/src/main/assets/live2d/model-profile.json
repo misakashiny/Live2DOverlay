@@ -60,8 +60,10 @@
       "name": "微笑",
       "kind": "oneshot",
       "durationMs": 1400,
+      "_comment": "v1.7.3（Bug-019）：原写 ParamEyeSmile —— 本模型没有该参数（静默失效）。已改为 cdi3 里真实存在的 ParamEyeLSmile / ParamEyeRSmile。",
       "tracks": [
-        { "param": "ParamEyeSmile", "keys": [[0, 0], [0.25, 1], [0.75, 1], [1, 0]] },
+        { "param": "ParamEyeLSmile", "keys": [[0, 0], [0.25, 1], [0.75, 1], [1, 0]] },
+        { "param": "ParamEyeRSmile", "keys": [[0, 0], [0.25, 1], [0.75, 1], [1, 0]] },
         { "param": "ParamMouthForm", "keys": [[0, 0], [0.25, 0.9], [0.75, 0.9], [1, 0]] }
       ]
     },
@@ -112,9 +114,9 @@
       "name": "待机呼吸",
       "kind": "loop",
       "durationMs": 3400,
+      "_comment": "v1.7.3（Bug-019）：原第二轨是 ParamBustY —— 本模型没有任何 Bust 参数，属静默失效，已移除。呼吸只用 ParamBreath。",
       "tracks": [
-        { "param": "ParamBreath", "keys": [[0, 0.1], [0.5, 1], [1, 0.1]] },
-        { "param": "ParamBustY", "keys": [[0, 0], [0.5, 0.6], [1, 0]] }
+        { "param": "ParamBreath", "keys": [[0, 0.1], [0.5, 1], [1, 0.1]] }
       ]
     }
   ],

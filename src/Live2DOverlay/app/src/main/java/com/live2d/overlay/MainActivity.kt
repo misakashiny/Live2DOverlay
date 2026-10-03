@@ -706,6 +706,16 @@ class MainActivity : AppCompatActivity() {
             toast("已请求播放，详见运行日志")
         }
 
+        // v1.7.3（实验）：Soullink 情绪引擎开关。
+        // 改动必须**重载页面** —— 引擎的脚本加载与「让位」逻辑都在页面侧，热切换做不到。
+        binding.switchSoullink.isChecked = config.soullinkEnabled
+        binding.switchSoullink.setOnCheckedChangeListener { _, checked ->
+            config.soullinkEnabled = checked
+            L2DLog.i(L2DLog.Mod.AI, "Soullink 开关变更", "enabled=$checked")
+            toast(if (checked) "Soullink 已开启，正在重载页面…" else "Soullink 已关闭，正在重载页面…")
+            pushLiveUpdate()
+        }
+
         refreshPersonaView()
     }
 
