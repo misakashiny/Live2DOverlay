@@ -2,7 +2,7 @@
 
 Android 应用：在桌面上叠加 Live2D 模型，模型内可交互、模型外触摸完全穿透。
 
-**当前版本 `v1.7.6`**（`versionCode 14`）｜包名 `com.live2d.overlay`｜验证机型：小米平板 M2105K81AC / **Android 13**（实测）
+**当前版本 `v1.7.7`**（`versionCode 15`）｜包名 `com.live2d.overlay`｜验证机型：小米平板 M2105K81AC / **Android 13**（实测）
 
 > 🧪 **v1.7.3 新增实验能力**：接入第三方情绪引擎
 > [Soullink Emotion SDK](https://github.com/nanlingyin/soullink-emotion-sdk)（VAD 连续情绪 + FACS/AU +

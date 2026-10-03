@@ -1375,6 +1375,78 @@
     }
   }
 
+  // ==================================================================
+  // v1.7.7：点击 / 自发表演 —— 补上「用户交互 → 情绪」这条链
+  //
+  // ★ 复盘：v1.7.3 接入时我给 reactToTap() 加了 `if (soullinkReady) return false;`
+  //   让位给引擎，但**引擎那边并没有接上点击的触发路径** —— 于是点击变成空操作，
+  //   只剩原生侧实现的缩放还能用（缩放不经过页面）。
+  //
+  //   正确做法在仓库文档 packages/README.md §4「触发情绪」里写得很清楚：
+  //     const vad = getVADPreset(emotion, variant);
+  //     runtime.triggerIntent({ emotion, naturalEmotion, naturalVAD, intensity,
+  //                             contextTags }, now, { vadTarget: vad });
+  //   不传固定 seed，所以连续点击同一情绪也会产生不同反应。
+  // ==================================================================
+
+  /** 点击时随机挑一个情绪（偏外向，反馈要明显） */
+  const SL_TAP_EMOTIONS = ["happy", "excited", "shy", "curious", "affectionate", "surprised"];
+  /** 定时自发表演用的情绪（偏温和，避免一直很亢奋） */
+  const SL_IDLE_EMOTIONS = ["happy", "calm", "curious", "affectionate"];
+
+  let slLastTapAt = 0;
+  let slAutoPulseAt = 0;
+
+  /**
+   * 触发一次明确情绪。点击与自发表演共用。
+   * @param {string} emotion  emotionVADPresets 里的键
+   * @param {number} intensity 0~1
+   * @param {string} tag       来源标记（写进日志便于排查）
+   */
+  function triggerSoullinkEmotion(emotion, intensity, tag) {
+    if (!soullinkReady || !soullinkRuntime) return false;
+    const lib = window.SoullinkEmotion;
+    if (!lib || typeof lib.getVADPreset !== "function") return false;
+    try {
+      const vad = lib.getVADPreset(emotion);
+      const now = performance.now() / 1000;
+      soullinkRuntime.triggerIntent({
+        emotion: emotion,
+        naturalEmotion: emotion,
+        naturalVAD: vad,
+        intensity: intensity,
+        contextTags: [tag || "manual"]
+      }, now, { vadTarget: vad });
+      LOG.i(M.AI, "已触发情绪", "emotion=" + emotion +
+        " intensity=" + intensity.toFixed(2) + " 来源=" + (tag || "manual"));
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "触发情绪失败", "emotion=" + emotion + " err=" + (e && e.message));
+      return false;
+    }
+  }
+
+  /**
+   * 定时自发表演：每 12~30 秒随机触发一次温和情绪。
+   *
+   * 为什么需要它：用户反馈「动画少了点不够多」。
+   * 引擎的 VAD 底色只能带来小幅漂移，缺少「主动做点什么」的层次；
+   * 定时触发明确情绪能把 VAD 推离基线 → 带动 privateEmotionMap 的姿态与表情层，
+   * 动画自然就多起来了。
+   */
+  function soullinkAutoPulse(nowSec) {
+    if (!soullinkReady) return;
+    if (nowSec < slAutoPulseAt) return;
+    // v1.7.7c：间隔 12~30s → 20~45s、强度 0.45~0.75 → 0.30~0.50。
+    // 原因：实测自发表演太频繁/太强会把 VAD 顶到高位，导致 privateEmotionMap 的
+    // 姿态「锁死」在某个区域（连续多个窗口 100%），反而显得僵。
+    // 自发表演的目的是「偶尔做点什么」，不是「一直很亢奋」。
+    slAutoPulseAt = nowSec + 20 + Math.random() * 25;
+    const pool = SL_IDLE_EMOTIONS;
+    const emo = pool[Math.floor(Math.random() * pool.length)];
+    triggerSoullinkEmotion(emo, 0.30 + Math.random() * 0.20, "auto_idle");
+  }
+
   /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */  function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
       if (window.SoullinkEmotion) return resolve(window.SoullinkEmotion);
@@ -1459,6 +1531,8 @@
     // v1.7.5：模型就绪后补注入参数信息（见 maybeInjectPrivateParams 的注释）
     maybeInjectPrivateParams();
     const nowSec = performance.now() / 1000;
+    // v1.7.7：定时自发表演（每 12~30 秒一次），解决「动画不够多」
+    soullinkAutoPulse(nowSec);
     const dt = Math.max(0, Math.min(0.25, nowSec - soullinkLastSec));
     soullinkLastSec = nowSec;
     try {
@@ -1536,6 +1610,14 @@
     return JSON.stringify({
       enabled: soullinkEnabled, ready: soullinkReady, frames: soullinkFrames
     });
+  };
+
+  /**
+   * v1.7.7：Android → 页面，直接触发一个明确情绪。
+   * 与 __mikuLive2DSoullinkMessage 的区别：那个走文本分类，这个跳过分类直接给情绪名。
+   */
+  window.__mikuLive2DSoullinkEmotion = function(emotion) {
+    return triggerSoullinkEmotion(String(emotion || "happy"), 0.8, "android");
   };
 
   let activeAction = null;          // 当前正在播放的自带动作
@@ -1710,10 +1792,22 @@
   /** 点击模型：随机播一个模型自带动作/表情（R3） */
   async function reactToTap() {
     try {
-      // v1.7.3：Soullink 启用时，点击动作也交给引擎 ——
-      // 8 个离散动作参数（Param125/130-136）已由 privateEmotionMap 接管，
-      // 这里再播一次内置动作会与引擎抢所有权。
-      if (soullinkReady) return false;
+      // ★ v1.7.7 复盘修复：v1.7.3 这里写的是 `if (soullinkReady) return false;`
+      //   —— 让位给引擎，但引擎侧**根本没接点击的触发路径**，
+      //   结果点击变成空操作（只剩原生侧实现的缩放还能用）。
+      //   正确做法：把点击转成一次 triggerIntent（仓库文档 packages/README.md §4）。
+      if (soullinkReady) {
+        const now = performance.now() / 1000;
+        // 限流 260ms：连点不该把 VAD 顶爆，但也不能毫无反应
+        if (now - slLastTapAt < 0.26) return true;
+        slLastTapAt = now;
+        const pool = SL_TAP_EMOTIONS;
+        const emo = pool[Math.floor(Math.random() * pool.length)];
+        triggerSoullinkEmotion(emo, 0.75 + Math.random() * 0.2, "tap");
+        // 点击顺带把下一次自发表演推后，避免刚点完又自动来一次
+        slAutoPulseAt = now + 10 + Math.random() * 12;
+        return true;
+      }
 
       // v1.7.2：人设若定义了 onTap 动画槽，优先播它（关键帧动画表现力更好）；
       // 没定义 / 播失败则回落到下面原有的 actions 路径 —— 保证行为不退化。

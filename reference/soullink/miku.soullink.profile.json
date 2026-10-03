@@ -23,7 +23,10 @@
       "v1.7.5 终调：blush D 门槛 0.20→0.06、intensity 0.9→0.6（避免脸红常开）",
       "v1.7.6：按 arousal 窗口错开同组姿态以强制轮换；leanForward 门槛 0.55→0.62；姿态 intensity→0.95；decayRate 0.30→0.18、hold 6→12s、spontaneity→2.0、avoidRepeatWindow→2",
       "v1.7.6b：decayRate 0.18→0.26（避免情绪累积）；同组姿态按 arousal 切成不重叠三段(0.24-0.36/0.34-0.44/0.42-0.52)强制轮换",
-      "v1.7.6c：leanForward V 门槛→0.70（避免 A>0.44 时独占常开）；heart 窗口下移到 A[0.28,0.40] 与 sing 错开"
+      "v1.7.6c：leanForward V 门槛→0.70（避免 A>0.44 时独占常开）；heart 窗口下移到 A[0.28,0.40] 与 sing 错开",
+      "v1.7.7b：点击会把 VAD 推高导致姿态锁死 → hold 12→6s、decay 0.26→0.34",
+      "v1.7.7c：leanForward 改为只在 A[0.62,0.90] 出现（待机不该一直前倾）；spin A[0.20,0.36] / qqMode A[0.34,0.60]",
+      "v1.7.7d：姿态 intensity 0.95→0.75（部分呈现，避免全开锁死）"
     ]
   },
   "schemaVersion": 2,
@@ -369,12 +372,12 @@
         ],
         "arousal": [
           0.34,
-          0.44
+          0.6
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 50,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -392,13 +395,13 @@
           1
         ],
         "arousal": [
-          0.24,
+          0.2,
           0.36
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 55,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -413,17 +416,17 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.7,
+          0.6,
           1
         ],
         "arousal": [
-          0.42,
-          0.6
+          0.62,
+          0.9
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 40,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -447,7 +450,7 @@
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -472,7 +475,7 @@
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -497,7 +500,7 @@
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.95,
+      "intensity": 0.75,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -523,7 +526,7 @@
     },
     "ambientDriftStrength": 0.09,
     "reactivity": 1.6,
-    "decayRate": 0.26,
-    "emotionHoldSeconds": 12
+    "decayRate": 0.34,
+    "emotionHoldSeconds": 6
   }
 }
