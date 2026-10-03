@@ -1089,13 +1089,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         }
         val wv = webView ?: return
 
-        val json = try {
-            assets.open("live2d/soullink.profile.json")
-                .bufferedReader().use { it.readText() }
-        } catch (t: Throwable) {
-            L2DLog.w(L2DLog.Mod.AI, "Soullink 档案缺失，引擎未启动", "err=${t.javaClass.simpleName}")
-            return
-        }
+        // v1.7.5：优先读 sdcard 覆盖版 —— 这样调 motionStyle / 幅度只需 push 一个 JSON，
+        // 不用重新构建装机（与 model-profile.json 的加载策略一致）。
+        val json = loadSoullinkProfileText() ?: return
 
         // 结构校验：没有 parameterMap 的话引擎起来也是空转
         val mapSize = try {
@@ -1153,6 +1149,43 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         } catch (t: Throwable) {
             L2DLog.w(L2DLog.Mod.MOTION, "内置模型档案缺失，沿用页面内置动作库",
                 "err=${t.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /**
+     * v1.7.5：读取 Soullink 档案文本。
+     *
+     * 优先级：`/sdcard/Live2DModels/<模型目录>/soullink.profile.json`
+     *      → `assets/live2d/soullink.profile.json`
+     *
+     * 为什么优先 sdcard：调 `motionStyle` / 动作幅度时只需 push 一个 JSON 再重开悬浮窗，
+     * **不用重新构建装机** —— 调参是高频迭代，这条通路很关键。
+     * （与 `model-profile.json` 的加载策略一致。）
+     */
+    private fun loadSoullinkProfileText(): String? {
+        try {
+            val mp = config.modelPath
+            if (mp.startsWith("file://")) {
+                val modelFile = java.io.File(android.net.Uri.parse(mp).path ?: "")
+                val f = java.io.File(modelFile.parentFile, "soullink.profile.json")
+                if (f.isFile) {
+                    val text = f.readText()
+                    L2DLog.i(L2DLog.Mod.AI, "使用模型目录内的 Soullink 档案",
+                        "path=${f.absolutePath} bytes=${text.length}")
+                    return text
+                }
+            }
+        } catch (t: Throwable) {
+            L2DLog.w(L2DLog.Mod.AI, "读取 sdcard Soullink 档案失败", "err=${t.javaClass.simpleName}")
+        }
+        return try {
+            val text = assets.open("live2d/soullink.profile.json")
+                .bufferedReader().use { it.readText() }
+            L2DLog.i(L2DLog.Mod.AI, "使用内置 Soullink 档案", "bytes=${text.length}")
+            text
+        } catch (t: Throwable) {
+            L2DLog.w(L2DLog.Mod.AI, "Soullink 档案缺失，引擎未启动", "err=${t.javaClass.simpleName}")
             null
         }
     }

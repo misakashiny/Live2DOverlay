@@ -1248,9 +1248,119 @@
   let soullinkReady = false;
   let soullinkLastSec = 0;
   let soullinkFrames = 0;
+  /** v1.7.5：保存注入的档案，供 buildPrivateParamInfo() 反查目标参数 */
+  let soullinkProfile = null;
 
-  /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
-  function loadSoullinkEngine() {
+  // v1.7.5 诊断：累计最近一段窗口内各参数的 min/max，
+  // 用来回答「引擎到底把参数推了多大」——「没有动画感」是幅度问题还是别的。
+  let slStat = null;
+
+  function slAccumulate(ps) {
+    if (!slStat) slStat = { n: 0, min: Object.create(null), max: Object.create(null), keys: Object.create(null) };
+    for (const k in ps) {
+      const v = ps[k];
+      slStat.keys[k] = 1;
+      if (slStat.min[k] === undefined || v < slStat.min[k]) slStat.min[k] = v;
+      if (slStat.max[k] === undefined || v > slStat.max[k]) slStat.max[k] = v;
+    }
+    slStat.n++;
+  }
+
+  /** 汇报本窗口内关键参数的实际取值范围（Δ 就是「看得见的幅度」） */
+  function slReport() {
+    if (!slStat || slStat.n === 0) return "";
+    const want = ["ParamAngleX", "ParamAngleY", "ParamAngleZ", "ParamBodyAngleX",
+                  "ParamBreath", "ParamEyeLOpen", "ParamEyeBallX", "ParamMouthForm",
+                  "ParamEyeLSmile", "ParamBrowLY",
+                  // ★ v1.7.5：把 7 个离散姿态参数也纳入统计 ——
+                  // 否则「离散动作到底有没有触发」是盲的（它们的门槛靠 VAD，最容易调错）。
+                  "Param125", "Param130", "Param131", "Param132",
+                  "Param133", "Param134", "Param135", "Param136"];
+    const parts = [];
+    for (const k of want) {
+      if (slStat.min[k] === undefined) continue;
+      const span = slStat.max[k] - slStat.min[k];
+      parts.push(k.replace("Param", "") + "=" + slStat.min[k].toFixed(2) + "~" +
+                 slStat.max[k].toFixed(2) + "(Δ" + span.toFixed(2) + ")");
+    }
+    const allKeys = Object.keys(slStat.keys);
+    return "参数种类=" + allKeys.length + " " + parts.join(" ");
+  }
+
+  /**
+   * v1.7.5：从模型读参数信息（min/max/default），供引擎的 privateEmotionMap 使用。
+   *
+   * ★★ 为什么必须由宿主注入 ★★
+   *   引擎的 deriveParameterRanges() 只扫 `profile.parameterMap` + `customParams`，
+   *   **完全不含 privateEmotionMap 的目标** —— 所以 Param130/133/134/135/125/131/132/136
+   *   拿不到取值范围，会被 selectDeclaredCandidates 直接丢弃。
+   *   实测后果：`snapshot.live2dParams` 里根本没有这些参数（只有 23 个），
+   *   即「7 条语义情绪一条都没生效、离散姿态从不出现」。
+   *   正确做法就是这里：把模型的真实参数表喂给 setPrivateVADParameters()。
+   */
+  function buildPrivateParamInfo() {
+    const out = {};
+    const core = model && model.internalModel && model.internalModel.coreModel;
+    if (!core || typeof core.getParameterIndex !== "function") return out;
+
+    // ★ 只用 getParameterIndex(id) 反查下标 ——
+    //   实测 pixi-live2d-display 0.4.0 的 coreModel **没有 getParameterId(index)**，
+    //   按 index 枚举会抛 "getParameterId is not a function"。
+    //   而我们本来也只需要 privateEmotionMap 的目标参数，反查更稳更省。
+    const wanted = new Set();
+    const pem = (soullinkProfile && soullinkProfile.privateEmotionMap) || {};
+    for (const m of Object.values(pem)) {
+      if (m && m.target) wanted.add(m.target);
+      for (const t of (m && m.targets) || []) wanted.add(t);
+    }
+    for (const id of wanted) {
+      try {
+        const idx = core.getParameterIndex(id);
+        if (idx === undefined || idx === null || idx < 0) continue;
+        out[id] = {
+          min: core.getParameterMinimumValue(idx),
+          max: core.getParameterMaximumValue(idx),
+          default: core.getParameterDefaultValue(idx)
+        };
+      } catch (e) { /* 单个参数读不到就跳过 */ }
+    }
+    return out;
+  }
+
+  let soullinkParamInfoInjected = false;
+  let soullinkParamInfoTries = 0;
+  let soullinkParamInfoGivenUp = false;
+
+  /**
+   * 幂等：等「引擎就绪」且「模型就绪」后注入一次参数信息。
+   *
+   * ★ 必须有尝试上限 —— 本函数每帧都被调，若模型一直读不到参数（API 不兼容等），
+   *   无上限的失败日志会把日志环形缓冲刷爆（实测发生过：一秒钟几百条）。
+   */
+  function maybeInjectPrivateParams() {
+    if (soullinkParamInfoInjected || soullinkParamInfoGivenUp) return;
+    if (!soullinkReady || !soullinkRuntime) return;
+    if (++soullinkParamInfoTries > 900) {          // ≈15 秒
+      soullinkParamInfoGivenUp = true;
+      LOG.w(M.AI, "放弃注入模型参数信息（离散姿态将不可用）",
+        "tries=" + soullinkParamInfoTries);
+      return;
+    }
+    const info = buildPrivateParamInfo();
+    const n = Object.keys(info).length;
+    if (n === 0) return;                            // 模型还没就绪 / 参数读不到
+    try {
+      const summary = soullinkRuntime.setPrivateVADParameters(info);
+      soullinkParamInfoInjected = true;
+      LOG.i(M.AI, "已注入模型参数信息（privateEmotionMap 用）",
+        "参数数=" + n + " 私有情绪候选=" + JSON.stringify(summary));
+    } catch (e) {
+      soullinkParamInfoGivenUp = true;
+      LOG.w(M.AI, "注入模型参数信息失败，已放弃", "err=" + (e && e.message));
+    }
+  }
+
+  /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */  function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
       if (window.SoullinkEmotion) return resolve(window.SoullinkEmotion);
       const s = document.createElement("script");
@@ -1275,12 +1385,29 @@
       return false;
     }
     if (soullinkReady) return true;
+    // v1.7.5：存下来 —— buildPrivateParamInfo() 要从 privateEmotionMap 反推需要哪些参数
+    soullinkProfile = profile;
 
     loadSoullinkEngine().then(function(lib) {
       try {
+        // v1.7.5：motionStyle 允许由 profile 覆盖（这样调参只需改 JSON，不用重编译）。
+        // profile.motionStyle 里可以放 { preset: "lively", idleActionGain: 1.5, ... }
+        const styleCfg = (profile && profile.motionStyle) ? profile.motionStyle : {};
+        const presetName = styleCfg.preset && lib.motionStylePresets[styleCfg.preset]
+          ? styleCfg.preset : "natural";
+        const merged = Object.assign({}, lib.motionStylePresets[presetName], { seed: 20260717 });
+        for (const k in styleCfg) {
+          if (k !== "preset") merged[k] = styleCfg[k];
+        }
+
         soullinkRuntime = new lib.SoullinkRuntime({
           profile: profile,
-          motionStyle: Object.assign({}, lib.motionStylePresets.natural, { seed: 20260717 })
+          motionStyle: merged,
+          // v1.7.5：情绪「底色」也可由 profile 覆盖。
+          // 引擎默认 baseline=(0,0,0) 且 ambientDriftStrength=0.034 —— VAD 会死贴 0，
+          // 于是 privateEmotionMap 的高情绪门槛永远达不到，表情层全程不动。
+          // 给它一个正向底色 + 更强的漂移，角色才有「活着」的起伏。
+          emotionPersonality: (profile && profile.emotionPersonality) ? profile.emotionPersonality : undefined
         });
 
         // ★ 让位：清空内置关键帧动画，避免与引擎抢同一批参数
@@ -1291,11 +1418,16 @@
 
         soullinkReady = true;
         soullinkLastSec = performance.now() / 1000;
+        // v1.7.5：如果模型已经就绪，立刻补注入参数信息（否则留给每帧的 tick 兜底）
+        maybeInjectPrivateParams();
         LOG.i(M.AI, "Soullink 引擎已启动",
           "modelId=" + profile.modelId +
           " parameterMap=" + Object.keys(profile.parameterMap || {}).length +
           " privateEmotion=" + Object.keys(profile.privateEmotionMap || {}).length +
           " idleConfig=" + Object.keys(profile.idleConfig || {}).length +
+          " 动作风格=" + presetName + " 覆盖键=" + Object.keys(styleCfg).join("/") +
+          " 情绪基线=" + (profile.emotionPersonality && profile.emotionPersonality.baseline
+            ? JSON.stringify(profile.emotionPersonality.baseline) : "默认(0,0,0)") +
           " 内置动画已清空=" + ANIMATIONS.length);
       } catch (e) {
         LOG.e(M.AI, "Soullink 引擎启动失败", "err=" + (e && e.message));
@@ -1309,6 +1441,8 @@
   /** 每帧推进引擎并落地参数。由 beforeModelUpdate 调用。 */
   function tickSoullink() {
     if (!soullinkReady || !soullinkRuntime) return;
+    // v1.7.5：模型就绪后补注入参数信息（见 maybeInjectPrivateParams 的注释）
+    maybeInjectPrivateParams();
     const nowSec = performance.now() / 1000;
     const dt = Math.max(0, Math.min(0.25, nowSec - soullinkLastSec));
     soullinkLastSec = nowSec;
@@ -1316,15 +1450,19 @@
       const snap = soullinkRuntime.update(nowSec, dt);
       const ps = snap.live2dParams || {};
       for (const k in ps) setParam(k, ps[k]);
+      slAccumulate(ps);
       soullinkFrames++;
-      // 每 300 帧（约 5 秒）汇报一次，便于真机验收；平时不刷日志
+      // 每 300 帧（约 5 秒）汇报一次；平时不刷日志
       if (soullinkFrames % 300 === 1) {
         LOG.d(M.AI, "Soullink 运行中",
-          "帧=" + soullinkFrames + " 参数=" + Object.keys(ps).length +
+          "帧=" + soullinkFrames +
           " 情绪=" + (snap.vad ? snap.vad.dominantEmotion : "?") +
           " V=" + (snap.vad ? snap.vad.current.valence.toFixed(2) : "?") +
           " A=" + (snap.vad ? snap.vad.current.arousal.toFixed(2) : "?") +
           " D=" + (snap.vad ? snap.vad.current.dominance.toFixed(2) : "?"));
+        // v1.7.5 诊断：这一窗口内参数的真实摆幅（Δ 就是「看得见的幅度」）
+        LOG.d(M.AI, "Soullink 幅度(" + (slStat ? slStat.n : 0) + "帧)", slReport());
+        slStat = null;
       }
     } catch (e) {
       // 出错即停用，避免每帧刷屏
