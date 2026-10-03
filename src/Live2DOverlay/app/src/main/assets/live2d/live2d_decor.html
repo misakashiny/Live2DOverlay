@@ -1256,13 +1256,24 @@
   let slStat = null;
 
   function slAccumulate(ps) {
-    if (!slStat) slStat = { n: 0, min: Object.create(null), max: Object.create(null), keys: Object.create(null) };
+    if (!slStat) slStat = { n: 0, min: Object.create(null), max: Object.create(null),
+                            keys: Object.create(null), active: Object.create(null),
+                            moved: Object.create(null), last: null };
+    const prev = slStat.last;
     for (const k in ps) {
       const v = ps[k];
       slStat.keys[k] = 1;
       if (slStat.min[k] === undefined || v < slStat.min[k]) slStat.min[k] = v;
       if (slStat.max[k] === undefined || v > slStat.max[k]) slStat.max[k] = v;
+      // v1.7.5b 占空比：|v| > 0.1 视为「该通道处于激活态」
+      // 用户反馈「有点动画了但时间不长」→ 需要区分「幅度够但闪一下就没了」和「一直在动」
+      if (Math.abs(v) > 0.1) slStat.active[k] = (slStat.active[k] || 0) + 1;
+      // 运动占比：与上一帧的差 > 0.002 视为「这一帧在动」
+      if (prev && prev[k] !== undefined && Math.abs(v - prev[k]) > 0.002) {
+        slStat.moved[k] = (slStat.moved[k] || 0) + 1;
+      }
     }
+    slStat.last = ps;
     slStat.n++;
   }
 
@@ -1276,12 +1287,16 @@
                   // 否则「离散动作到底有没有触发」是盲的（它们的门槛靠 VAD，最容易调错）。
                   "Param125", "Param130", "Param131", "Param132",
                   "Param133", "Param134", "Param135", "Param136"];
+    const n = slStat.n;
     const parts = [];
     for (const k of want) {
       if (slStat.min[k] === undefined) continue;
       const span = slStat.max[k] - slStat.min[k];
+      const on = Math.round(100 * (slStat.active[k] || 0) / n);
+      const mv = Math.round(100 * (slStat.moved[k] || 0) / n);
       parts.push(k.replace("Param", "") + "=" + slStat.min[k].toFixed(2) + "~" +
-                 slStat.max[k].toFixed(2) + "(Δ" + span.toFixed(2) + ")");
+                 slStat.max[k].toFixed(2) + "(Δ" + span.toFixed(2) +
+                 " 激活" + on + "% 动" + mv + "%)");
     }
     const allKeys = Object.keys(slStat.keys);
     return "参数种类=" + allKeys.length + " " + parts.join(" ");
@@ -1452,15 +1467,16 @@
       for (const k in ps) setParam(k, ps[k]);
       slAccumulate(ps);
       soullinkFrames++;
-      // 每 300 帧（约 5 秒）汇报一次；平时不刷日志
-      if (soullinkFrames % 300 === 1) {
+      // 每 600 帧（约 10 秒）汇报一次；平时不刷日志。
+      // 窗口取 10 秒而不是 5 秒 —— 「动画时长」是统计问题，窗口太短看不出占空比。
+      if (soullinkFrames % 600 === 1) {
         LOG.d(M.AI, "Soullink 运行中",
           "帧=" + soullinkFrames +
           " 情绪=" + (snap.vad ? snap.vad.dominantEmotion : "?") +
           " V=" + (snap.vad ? snap.vad.current.valence.toFixed(2) : "?") +
           " A=" + (snap.vad ? snap.vad.current.arousal.toFixed(2) : "?") +
           " D=" + (snap.vad ? snap.vad.current.dominance.toFixed(2) : "?"));
-        // v1.7.5 诊断：这一窗口内参数的真实摆幅（Δ 就是「看得见的幅度」）
+        // v1.7.5 诊断：这一窗口内参数的真实摆幅 + 激活/运动占空比
         LOG.d(M.AI, "Soullink 幅度(" + (slStat ? slStat.n : 0) + "帧)", slReport());
         slStat = null;
       }

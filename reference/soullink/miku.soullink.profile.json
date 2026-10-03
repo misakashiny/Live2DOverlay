@@ -20,7 +20,10 @@
       "privateEmotionMap 由人工补齐（来源：8 个 exp3 文件的实际内容 + cdi3 显示名）",
       "Param137(水印) 未纳入 privateEmotionMap —— 它是反向语义的显示开关，不是情绪，由宿主页面压制",
       "v1.7.5 增强：scale 放大(head 30→60/body 12→28/gaze 1→2.5)；motionStyle=lively+满增益；emotionPersonality baseline(0.40,0.35,0.10)+drift0.09+decay0.30；privateEmotionMap 门槛放宽以支持待机漂移触发",
-      "v1.7.5 终调：blush D 门槛 0.20→0.06、intensity 0.9→0.6（避免脸红常开）"
+      "v1.7.5 终调：blush D 门槛 0.20→0.06、intensity 0.9→0.6（避免脸红常开）",
+      "v1.7.6：按 arousal 窗口错开同组姿态以强制轮换；leanForward 门槛 0.55→0.62；姿态 intensity→0.95；decayRate 0.30→0.18、hold 6→12s、spontaneity→2.0、avoidRepeatWindow→2",
+      "v1.7.6b：decayRate 0.18→0.26（避免情绪累积）；同组姿态按 arousal 切成不重叠三段(0.24-0.36/0.34-0.44/0.42-0.52)强制轮换",
+      "v1.7.6c：leanForward V 门槛→0.70（避免 A>0.44 时独占常开）；heart 窗口下移到 A[0.28,0.40] 与 sing 错开"
     ]
   },
   "schemaVersion": 2,
@@ -339,7 +342,7 @@
         ],
         "dominance": [
           -1,
-          0.06
+          0.1
         ]
       },
       "activeValue": 1,
@@ -361,17 +364,17 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.45,
+          0.42,
           1
         ],
         "arousal": [
-          0.32,
-          1
+          0.34,
+          0.44
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.8,
+      "intensity": 0.95,
       "priority": 50,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -385,17 +388,17 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.45,
+          0.42,
           1
         ],
         "arousal": [
-          0.4,
-          1
+          0.24,
+          0.36
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.75,
+      "intensity": 0.95,
       "priority": 55,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -410,17 +413,17 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.7,
           1
         ],
         "arousal": [
-          0.05,
-          0.9
+          0.42,
+          0.6
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.7,
+      "intensity": 0.95,
       "priority": 40,
       "exclusiveGroup": "miku_pose",
       "source": "manual",
@@ -434,17 +437,17 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.45,
+          0.42,
           1
         ],
         "arousal": [
-          0.1,
-          0.9
+          0.24,
+          0.34
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.7,
+      "intensity": 0.95,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -463,13 +466,13 @@
           1
         ],
         "arousal": [
-          0.05,
-          0.8
+          0.38,
+          0.48
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.7,
+      "intensity": 0.95,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -488,13 +491,13 @@
           1
         ],
         "arousal": [
-          0.02,
-          0.7
+          0.28,
+          0.4
         ]
       },
       "activeValue": 1,
       "neutralValue": 0,
-      "intensity": 0.8,
+      "intensity": 0.95,
       "priority": 30,
       "exclusiveGroup": "miku_prop",
       "source": "manual",
@@ -505,11 +508,12 @@
     "preset": "lively",
     "idleActionGain": 1.9,
     "microMotionGain": 1.8,
-    "spontaneity": 1.7,
-    "gestureFrequency": 1.6,
+    "spontaneity": 2,
+    "gestureFrequency": 2,
     "blinkRate": 1.2,
     "breathVariance": 0.7,
-    "gazeStability": 0.5
+    "gazeStability": 0.5,
+    "avoidRepeatWindow": 2
   },
   "emotionPersonality": {
     "baseline": {
@@ -519,7 +523,7 @@
     },
     "ambientDriftStrength": 0.09,
     "reactivity": 1.6,
-    "decayRate": 0.3,
-    "emotionHoldSeconds": 6
+    "decayRate": 0.26,
+    "emotionHoldSeconds": 12
   }
 }
