@@ -79,6 +79,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         private const val HIT_SLOP_PX = 12
 
+        /** v1.7.2：动画 id 白名单（防止拼接进 JS 时被注入） */
+        private val ANIM_ID_OK = Regex("^[A-Za-z0-9_-]{1,64}$")
+
         const val ACTION_START = "com.live2d.overlay.action.START"
         const val ACTION_STOP = "com.live2d.overlay.action.STOP"
         const val ACTION_REFRESH = "com.live2d.overlay.action.REFRESH"
@@ -103,6 +106,23 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          * 白名单内的 key，不接受任意 JS 片段。
          */
         const val ACTION_SET_PAGE_OPTION = "com.live2d.overlay.action.SET_PAGE_OPTION"
+
+        /**
+         * v1.7.2（AI 角色系统）：播放一个关键帧动画。
+         *
+         * 单独开这条通道而不是复用 ACTION_DEBUG_JS，原因同 ACTION_SET_PAGE_OPTION ——
+         * 调试通道必须在 release 下关闭，而这是正式能力（后续情绪引擎 P2 会大量调用）。
+         * id 只允许 [A-Za-z0-9_-]，避免拼进 JS 时被注入。
+         */
+        const val ACTION_PLAY_ANIMATION = "com.live2d.overlay.action.PLAY_ANIMATION"
+
+        /**
+         * v1.7.2：只重新推送人设，**不重载页面**。
+         *
+         * 为什么不用 ACTION_REFRESH：那会重新加载模型（数秒白屏）。切角色只影响行为，
+         * 不需要重建 WebView —— 与 ACTION_SET_ALPHA / ACTION_SET_TOUCHABLE 同样的取舍。
+         */
+        const val ACTION_REPUSH_PERSONA = "com.live2d.overlay.action.REPUSH_PERSONA"
 
         /** v1.4.0：仅更新窗口透明度，不重载页面（Bug-A 修复配套） */
         const val ACTION_SET_ALPHA = "com.live2d.overlay.action.SET_ALPHA"
@@ -241,6 +261,25 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
             }
             ACTION_SET_PAGE_OPTION -> {
                 applyPageOption(intent.getStringExtra("key"), intent.getBooleanExtra("on", false))
+                return START_STICKY
+            }
+            ACTION_PLAY_ANIMATION -> {
+                // 两种用法：指定具体动画 id，或指定人设里的语义槽位（onTap / onIdle / …）
+                val id = intent.getStringExtra("id")
+                val slot = intent.getStringExtra("slot")
+                when {
+                    !id.isNullOrBlank() && ANIM_ID_OK.matches(id) ->
+                        evalJsQuiet(
+                            "window.__mikuLive2DPlayAnimation && window.__mikuLive2DPlayAnimation('$id')")
+                    !slot.isNullOrBlank() && ANIM_ID_OK.matches(slot) ->
+                        evalJsQuiet(
+                            "window.__mikuLive2DPlayPersonaSlot && window.__mikuLive2DPlayPersonaSlot('$slot')")
+                    else -> L2DLog.w(L2DLog.Mod.MOTION, "动画请求非法，已忽略", "id=$id slot=$slot")
+                }
+                return START_STICKY
+            }
+            ACTION_REPUSH_PERSONA -> {
+                pushPersonaToPage()
                 return START_STICKY
             }
             else -> {
@@ -915,6 +954,8 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 // 必须在 onPageFinished 之后 —— 页面的 __mikuLive2DApplyProfile
                 // 定义在内联 <script> 里，此时已可用。
                 pushModelProfileToPage()
+                // v1.7.2：人设必须在档案之后推送（人设的动画槽位引用档案里的动画 id）
+                pushPersonaToPage()
             }
 
             override fun onReceivedError(
@@ -983,6 +1024,31 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         )
     }
 
+    /**
+     * v1.7.2（AI 角色系统 P1）：把当前人设推给页面。
+     *
+     * ★ 必须在模型档案**之后**推送 —— 人设里的 `animations` 槽位引用的是
+     *   model-profile.json 里的动画 id，档案先落地页面才知道有哪些动画可用。
+     *
+     * 人设加载失败不影响可用性：页面保持内置行为（点击走原 actions 路径）。
+     */
+    private fun pushPersonaToPage() {
+        val wv = webView ?: return
+        val id = config.activePersonaId
+        val p = PersonaStore.load(this, id)
+        if (p == null) {
+            L2DLog.w(L2DLog.Mod.AI, "人设加载失败，页面沿用内置行为", "id=$id")
+            return
+        }
+        // 直接把原始 JSON 文本当实参：JSON 对象字面量是合法 JS 表达式
+        wv.evaluateJavascript(
+            "window.__mikuLive2DApplyPersona && window.__mikuLive2DApplyPersona(${p.rawJson})",
+            null
+        )
+        L2DLog.i(L2DLog.Mod.AI, "人设已推送",
+            "id=${p.id} name=${p.name} traits=${p.traits.size} bias=${p.emotionBias.size}")
+    }
+
     /** 依次尝试「模型目录旁的档案」→「assets 内置档案」；都读不到返回 null */
     private fun loadModelProfileJson(): String? {
         // 1) 模型目录旁的档案（随模型走，放 /sdcard 上可热改）
@@ -1025,7 +1091,10 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     }
 
     /**
-     * 档案结构校验：必须是 JSON 对象，且 `actions` 为非空数组。
+     * 档案结构校验：必须是 JSON 对象，且 `actions` 或 `animations` 至少有一个非空。
+     *
+     * ★ v1.7.2：加入 `animations`（v2 新增的关键帧动画）。
+     *   只认 actions 会把「纯动画档案」误判为非法而整份丢弃。
      *
      * ★ 这一步不能省。若不校验就直接 `evaluateJavascript`，非法 JSON 会让**整段脚本**
      * 解析失败 —— 页面里的 try/catch 根本不会执行，于是「已降级到内置动作库」
@@ -1035,7 +1104,8 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         return try {
             val o = org.json.JSONObject(text)
             val actions = o.optJSONArray("actions")
-            actions != null && actions.length() > 0
+            val anims = o.optJSONArray("animations")
+            (actions != null && actions.length() > 0) || (anims != null && anims.length() > 0)
         } catch (t: Throwable) {
             false
         }

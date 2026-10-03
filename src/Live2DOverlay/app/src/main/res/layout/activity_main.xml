@@ -190,6 +190,62 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <!-- ============ 角色人设（v1.7.2 / AI 角色系统 P1） ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@color/card_bg"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="角色人设（AI 角色系统 P1）"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_persona"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="当前角色：—"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="人设决定角色的性格、情绪基线与「什么情绪播什么动画」。放到 /sdcard/Live2DModels/&lt;角色&gt;/persona.json 可覆盖内置版本（改完重开悬浮窗生效）。"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_persona_pick"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="切换角色" />
+
+                <Button
+                    android:id="@+id/btn_anim_test"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="试播动画" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- ============ 显示参数 ============ -->
         <LinearLayout
             android:layout_width="match_parent"

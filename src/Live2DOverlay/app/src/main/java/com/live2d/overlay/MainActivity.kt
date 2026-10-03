@@ -146,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         setupUi()
         refreshState()
         setupLogPanel()
+        setupPersona()
         maybeRequestNotification()
     }
 
@@ -655,6 +656,73 @@ class MainActivity : AppCompatActivity() {
         L2DLog.Level.INFO, L2DLog.Level.WARN, L2DLog.Level.ERROR
     )
 
+    /**
+     * v1.7.2（AI 角色系统 P1）：角色人设面板。
+     *
+     * P1 只有「选择 + 应用」—— 情绪引擎(P2)/LLM(P4) 尚未接入，
+     * 但切换链路已经打通，后续接引擎不需要改这里。
+     */
+    private fun setupPersona() {
+        binding.btnPersonaPick.setOnClickListener {
+            val list = PersonaStore.list(this)
+            if (list.isEmpty()) {
+                toast("没有可用人设（assets/personas 为空？）")
+                return@setOnClickListener
+            }
+            val labels = list.map { p ->
+                val tags = if (p.tags.isBlank()) "" else "  " + p.tags
+                "${p.name}  [${p.id}·${p.source}]$tags"
+            }.toTypedArray()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("选择角色")
+                .setItems(labels) { _, which ->
+                    val p = list[which]
+                    config.activePersonaId = p.id
+                    refreshPersonaView()
+                    toast("已选择：${p.name}")
+                    L2DLog.i(L2DLog.Mod.AI, "已切换角色", "id=${p.id} source=${p.source}")
+                    // 悬浮窗在跑就重新推送（不重载页面，避免数秒白屏）
+                    if (OverlayService.isRunning) {
+                        safeStartService(Intent(this, OverlayService::class.java).apply {
+                            setAction(OverlayService.ACTION_REPUSH_PERSONA)
+                        })
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+
+        binding.btnAnimTest.setOnClickListener {
+            if (!OverlayService.isRunning) {
+                toast("请先启用悬浮窗")
+                return@setOnClickListener
+            }
+            // 走人设的 onTap 语义槽位 —— 这条链路串起了
+            // 「人设 → 槽位 → 动画 id → 页面关键帧播放」，正好用来验收 P1。
+            safeStartService(Intent(this, OverlayService::class.java).apply {
+                setAction(OverlayService.ACTION_PLAY_ANIMATION)
+                putExtra("slot", "onTap")
+            })
+            toast("已请求播放，详见运行日志")
+        }
+
+        refreshPersonaView()
+    }
+
+    /** 刷新「当前角色」那一行 */
+    private fun refreshPersonaView() {
+        val id = config.activePersonaId
+        val p = PersonaStore.load(this, id)
+        binding.tvPersona.text = if (p == null) {
+            "当前角色：$id（加载失败，页面沿用内置行为）"
+        } else {
+            val src = PersonaStore.list(this).firstOrNull { it.id == id }?.source ?: "?"
+            val traits = if (p.traits.isEmpty()) "" else
+                "　性格 " + p.traits.entries.joinToString(" ") { "${it.key}=${it.value}" }
+            "当前角色：${p.name}（$id·$src）$traits"
+        }
+    }
+
     private fun setupLogPanel() {
         L2DLog.init(this)
 
@@ -840,6 +908,15 @@ class MainActivity : AppCompatActivity() {
         try {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             cm.setPrimaryClip(android.content.ClipData.newPlainText("l2d-log-line", text))
+            // v1.7.2：复制是「看不见的操作」—— 剪贴板内容无法从 adb 安全读取
+            // （`service call clipboard` 有误触 clearPrimaryClip 的风险）。
+            // 这里落一条日志记录字符数/行数/开头，既用于验收「长按复制单条」，
+            // 也便于排查「复制错了行」。
+            L2DLog.i(
+                L2DLog.Mod.UI, "已复制到剪贴板",
+                "chars=${text.length} lines=${text.count { it == '\n' } + 1} " +
+                        "preview=${text.take(48).replace('\n', '|')}"
+            )
         } catch (t: Throwable) {
             toast("复制失败：${t.message}")
         }

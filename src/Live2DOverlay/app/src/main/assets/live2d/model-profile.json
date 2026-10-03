@@ -1,19 +1,35 @@
 {
   "_comment": [
-    "Live2D 模型档案（model-profile）。把「动作库 / 参数映射 / 水印参数」从代码里外置出来，",
-    "换模型时只改本文件，不必动 live2d_decor.html。",
+    "Live2D 模型档案（model-profile）。把「动作库 / 动画 / 参数映射 / 水印参数」从代码里",
+    "外置出来，换模型时只改本文件，不必动 live2d_decor.html。",
     "",
-    "加载优先级（Android 侧 loadModelProfile）：",
+    "加载优先级（Android 侧 loadModelProfileJson）：",
     "  1. <模型目录>/model-profile.json   —— 随模型走，优先级最高（放 /sdcard 上可热改）",
     "  2. assets/live2d/model-profile.json —— 本文件，内置兜底",
     "  3. 两者都读不到 → 页面使用内置硬编码动作库（MODEL_ACTIONS），功能不受影响",
     "",
-    "★ 本文件只描述「数据」，不含任何逻辑。页面把 set/clear 编译成函数。",
+    "★ 本文件只描述「数据」，不含任何逻辑。页面负责解释它。",
     "★ 本模型（miku）的 model3.json 没有 Motions / Expressions 段，",
-    "  所有动作都由 moc3 内部参数直接驱动，故这里是「参数 → 值」的映射。"
+    "  所有动作都由 moc3 内部参数直接驱动，故这里是「参数 → 值」的映射。",
+    "",
+    "── v2 新增：animations（关键帧动画）────────────────────────────────",
+    "v1 的 actions 只能表达「把某参数设成某值、持续 N 毫秒」（离散姿态）。",
+    "animations 支持**关键帧曲线**，可以做出真正的动画（点头、摇摆、眨眼）。",
+    "",
+    "  一条轨道（track）：{ param, keys }",
+    "    keys 是 [归一化时间 0~1, 参数值] 的数组，页面按线性插值采样。",
+    "  两种类型（kind）：",
+    "    oneshot —— 播一次，结束后把该轨道参数归零（适合点头、惊讶）",
+    "    loop    —— 循环播放，适合待机摆动 / 呼吸",
+    "",
+    "  ★ 关键帧写入必须发生在 beforeModelUpdate（页面已如此实现）——",
+    "    在 ticker 里写会被随后的参数求值覆盖（Bug-003 的教训）。",
+    "  ★ oneshot 与 loop 可叠加；同名 loop 重复播放是幂等的。",
+    "  ★ 关键帧动画与 actions 互不干扰：前者走连续参数（ParamAngle* / ParamBreath 等），",
+    "    后者走离散动作参数（Param13x）。"
   ],
 
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "miku",
   "label": "初音未来",
 
@@ -27,6 +43,81 @@
     "_comment": "可选。留空则由页面按屏幕自动计算；触摸模式下位置由拖拽接管。",
     "clipBottomDesignY": 546.5
   },
+
+  "animations": [
+    {
+      "id": "nod",
+      "name": "点头",
+      "kind": "oneshot",
+      "durationMs": 1100,
+      "tracks": [
+        { "param": "ParamAngleY", "keys": [[0, 0], [0.30, -14], [0.62, 6], [1, 0]] },
+        { "param": "ParamAngleZ", "keys": [[0, 0], [0.30, 4], [1, 0]] }
+      ]
+    },
+    {
+      "id": "smile",
+      "name": "微笑",
+      "kind": "oneshot",
+      "durationMs": 1400,
+      "tracks": [
+        { "param": "ParamEyeSmile", "keys": [[0, 0], [0.25, 1], [0.75, 1], [1, 0]] },
+        { "param": "ParamMouthForm", "keys": [[0, 0], [0.25, 0.9], [0.75, 0.9], [1, 0]] }
+      ]
+    },
+    {
+      "id": "surprise",
+      "name": "惊讶",
+      "kind": "oneshot",
+      "durationMs": 900,
+      "tracks": [
+        { "param": "ParamEyeLOpen", "keys": [[0, 1], [0.15, 1.7], [0.60, 1.4], [1, 1]] },
+        { "param": "ParamEyeROpen", "keys": [[0, 1], [0.15, 1.7], [0.60, 1.4], [1, 1]] },
+        { "param": "ParamMouthOpenY", "keys": [[0, 0], [0.15, 1], [0.70, 0.5], [1, 0]] },
+        { "param": "ParamAngleY", "keys": [[0, 0], [0.15, 8], [1, 0]] }
+      ]
+    },
+    {
+      "id": "blush",
+      "name": "脸红",
+      "kind": "oneshot",
+      "durationMs": 2200,
+      "tracks": [
+        { "param": "Param130", "keys": [[0, 0], [0.25, 1], [0.80, 1], [1, 0]] },
+        { "param": "ParamAngleZ", "keys": [[0, 0], [0.40, -5], [1, 0]] }
+      ]
+    },
+    {
+      "id": "lean_forward",
+      "name": "前倾",
+      "kind": "oneshot",
+      "durationMs": 1600,
+      "tracks": [
+        { "param": "ParamBodyAngleX", "keys": [[0, 0], [0.30, 10], [0.75, 10], [1, 0]] },
+        { "param": "ParamAngleY", "keys": [[0, 0], [0.30, -6], [1, 0]] }
+      ]
+    },
+    {
+      "id": "idle_sway",
+      "name": "待机摆动",
+      "kind": "loop",
+      "durationMs": 4600,
+      "tracks": [
+        { "param": "ParamAngleX", "keys": [[0, 0], [0.25, 4.5], [0.75, -4.5], [1, 0]] },
+        { "param": "ParamAngleZ", "keys": [[0, 0], [0.35, 1.6], [0.85, -1.6], [1, 0]] }
+      ]
+    },
+    {
+      "id": "idle_breathe",
+      "name": "待机呼吸",
+      "kind": "loop",
+      "durationMs": 3400,
+      "tracks": [
+        { "param": "ParamBreath", "keys": [[0, 0.1], [0.5, 1], [1, 0.1]] },
+        { "param": "ParamBustY", "keys": [[0, 0], [0.5, 0.6], [1, 0]] }
+      ]
+    }
+  ],
 
   "actions": [
     {

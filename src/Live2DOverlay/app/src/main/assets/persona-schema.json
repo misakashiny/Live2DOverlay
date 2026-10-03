@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Live2D Overlay · 角色人设",
+  "$comment": [
+    "人设文件的结构约束。PersonaStore 里的 Kotlin 校验是这份 Schema 的等价实现 ——",
+    "改这里必须同步改 PersonaStore.validate()，否则两边会漂移。",
+    "之所以不引入 JSON Schema 库：Android 上加一个校验库（+ 依赖体积 + 混淆规则）",
+    "不划算，而本结构只有十几个字段，手写校验更可控、错误提示也更贴中文语境。"
+  ],
+  "type": "object",
+  "required": ["schemaVersion", "id", "name"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+      "$comment": "必须能安全用作文件名与 SharedPreferences 值"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "avatar": {
+      "type": "object",
+      "properties": { "model": { "type": "string" } },
+      "additionalProperties": true
+    },
+    "llm": {
+      "type": "object",
+      "properties": {
+        "endpointRef": { "type": "string" },
+        "model": { "type": "string" },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+        "maxTokens": { "type": "integer", "minimum": 16, "maximum": 4096 },
+        "systemPromptTemplate": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "personality": {
+      "type": "object",
+      "properties": {
+        "traits": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "speechStyle": {
+          "type": "object",
+          "properties": {
+            "tone": { "type": "string" },
+            "verbosity": { "enum": ["short", "normal", "verbose"] },
+            "forbidden": { "type": "array", "items": { "type": "string" } },
+            "catchphrases": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "emotionBias": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": -1, "maximum": 1 }
+    },
+    "emotionPhysics": {
+      "type": "object",
+      "properties": {
+        "decayRatePerSec": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "maxDeltaPerSec": { "type": "number", "minimum": 0.01, "maximum": 1 },
+        "aiWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+        "localWeight": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "animations": {
+      "type": "object",
+      "$comment": "值是 model-profile.json 里 animations[].id 的数组；未知 id 只告警不报错。",
+      "properties": {
+        "onTap": { "type": "array", "items": { "type": "string" } },
+        "onLongPressDrag": { "type": "array", "items": { "type": "string" } },
+        "onIdle": { "type": "array", "items": { "type": "string" } },
+        "onEmotion": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "maxTurns": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "persist": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

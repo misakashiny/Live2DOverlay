@@ -37,6 +37,10 @@ class OverlayConfig(context: Context) {
         const val KEY_EDGE_SNAP = "edge_snap"              // 边缘吸附（默认开）
         const val KEY_LOG_MIN_LEVEL = "log_min_level"      // 日志最低级别（默认 DEBUG）
 
+        // ---- v1.7.2（AI 角色系统 P1）----
+        const val KEY_ACTIVE_PERSONA = "active_persona_id" // 当前角色人设 id
+        const val DEF_ACTIVE_PERSONA = "miku"
+
         // ---- 默认值（对齐车机横屏 2560x720 场景）----
         const val DEF_CENTER_X = 1448f
         const val DEF_CENTER_Y = 420f
@@ -154,6 +158,16 @@ class OverlayConfig(context: Context) {
     var logMinLevel: String
         get() = prefs.getString(KEY_LOG_MIN_LEVEL, "D") ?: "D"
         set(v) = prefs.edit().putString(KEY_LOG_MIN_LEVEL, v).apply()
+
+    /**
+     * v1.7.2（AI 角色系统 P1）：当前生效的角色人设 id。
+     *
+     * 只存 id，不存整份 JSON —— 人设文件可能被用户改（sdcard 覆盖），
+     * 存副本会出现「改了文件但界面还用旧值」的困惑。
+     */
+    var activePersonaId: String
+        get() = prefs.getString(KEY_ACTIVE_PERSONA, DEF_ACTIVE_PERSONA) ?: DEF_ACTIVE_PERSONA
+        set(v) = prefs.edit().putString(KEY_ACTIVE_PERSONA, v).apply()
 
     /**
      * 构造 WebView 页面 URL。

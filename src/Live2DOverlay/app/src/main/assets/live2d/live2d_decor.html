@@ -440,7 +440,9 @@
   const M = {
     SVC: "SVC", CFG: "CFG", BRIDGE: "BRIDGE", UI: "UI",
     RENDER: "RENDER", TOUCH: "TOUCH", MOTION: "MOTION",
-    PARAM: "PARAM", WM: "WM", FX: "FX"
+    PARAM: "PARAM", WM: "WM", FX: "FX",
+    // v1.7.2：与 Kotlin L2DLog.Mod 成对（AI 角色系统 P1）
+    AI: "AI"
   };
 
   // ==================================================================
@@ -966,6 +968,8 @@
         return false;
       }
       MODEL_ACTIONS = built;
+      // v1.7.2：同时装载关键帧动画（与 actions 并存，互不干扰）
+      applyAnimations(profile);
       modelProfileDesc = (profile.id || "?") + "/" + built.length + "项";
       lastActionIndex = -1;
       // 动作库换了，进行中的动作必须作废，否则会用旧参数表去 clear
@@ -988,6 +992,232 @@
       LOG.w(M.MOTION, "模型档案应用失败，沿用内置动作库", "err=" + (e && e.message ? e.message : e));
       return false;
     }
+  };
+
+  // ==================================================================
+  // v1.7.2：关键帧动画框架（迭代清单 P2-3 的延伸 / AI 角色系统的基础设施）
+  //
+  // 为什么需要它：v1 的 actions 只能表达「把参数设成某值、持续 N 毫秒」，
+  // 是离散姿态，做不出「点头」「摇摆」这类连续动作。animations 用关键帧曲线
+  // 补上这一层，让「角色动画的制作」变成**写 JSON**而不是写代码。
+  //
+  // ★ 关键帧写入必须挂在 beforeModelUpdate。
+  //   渲染链路是「ticker → internalModel.update()（参数求值）→ 渲染」，
+  //   在 ticker 里 setParam 会被随后的求值覆盖（Bug-003 的教训，与参数覆盖同源）。
+  // ==================================================================
+
+  let ANIMATIONS = [];             // model-profile.json 的 animations 数组
+  let animById = Object.create(null);
+  let activeOneShot = null;        // { def, startSec }
+  const activeLoops = [];          // [{ def, startSec }]
+
+  /** 关键帧线性插值。keys = [[t0,v0],[t1,v1],...]，t 已归一化到 0~1 */
+  function lerpKeys(keys, t) {
+    const n = keys.length;
+    if (n === 0) return 0;
+    if (t <= keys[0][0]) return keys[0][1];
+    if (t >= keys[n - 1][0]) return keys[n - 1][1];
+    for (let i = 1; i < n; i++) {
+      if (t <= keys[i][0]) {
+        const t0 = keys[i - 1][0], v0 = keys[i - 1][1];
+        const t1 = keys[i][0], v1 = keys[i][1];
+        const span = t1 - t0;
+        const k = span <= 0 ? 1 : (t - t0) / span;
+        return v0 + (v1 - v0) * k;
+      }
+    }
+    return keys[n - 1][1];
+  }
+
+  function applyTracks(tracks, t) {
+    for (let i = 0; i < tracks.length; i++) {
+      const tr = tracks[i];
+      if (!tr || !tr.param || !tr.keys || tr.keys.length === 0) continue;
+      setParam(tr.param, lerpKeys(tr.keys, t));
+    }
+  }
+
+  /** 每帧推进动画。由 beforeModelUpdate 调用。 */
+  function tickAnimations() {
+    if (ANIMATIONS.length === 0) return;
+    const nowSec = performance.now() / 1000;
+
+    if (activeOneShot) {
+      const def = activeOneShot.def;
+      const durSec = def.durationMs / 1000;
+      const t = durSec <= 0 ? 1 : (nowSec - activeOneShot.startSec) / durSec;
+      if (t >= 1) {
+        // 结束后归零，否则参数会卡在最后一帧（模型定住不动）
+        for (let i = 0; i < def.tracks.length; i++) setParam(def.tracks[i].param, 0);
+        activeOneShot = null;
+        LOG.d(M.MOTION, "动画播放结束", "id=" + def.id);
+      } else {
+        applyTracks(def.tracks, t);
+      }
+    }
+
+    for (let i = 0; i < activeLoops.length; i++) {
+      const def = activeLoops[i].def;
+      const periodSec = def.durationMs / 1000;
+      if (periodSec <= 0) continue;
+      const t = ((nowSec - activeLoops[i].startSec) % periodSec) / periodSec;
+      applyTracks(def.tracks, t);
+    }
+  }
+
+  let animTickerInstalled = false;
+
+  /** 把动画帧写入挂到 beforeModelUpdate（与参数覆盖同一时机，不能挂 ticker） */
+  function installAnimationTicker() {
+    if (animTickerInstalled) return;
+    if (!model || !model.internalModel) return;
+    try {
+      model.internalModel.on("beforeModelUpdate", function() {
+        tickAnimations();
+      });
+      animTickerInstalled = true;
+      LOG.i(M.MOTION, "动画帧写入器已安装", "hook=beforeModelUpdate 库大小=" + ANIMATIONS.length);
+    } catch (e) {
+      LOG.e(M.MOTION, "动画帧写入器安装失败", "err=" + (e && e.message));
+    }
+  }
+
+  /** 从档案里装载动画定义。结构非法时保留上一份，不把动画清空。 */
+  function applyAnimations(profile) {
+    if (!profile || !Array.isArray(profile.animations)) return false;
+    const list = [];
+    const map = Object.create(null);
+    for (let i = 0; i < profile.animations.length; i++) {
+      const a = profile.animations[i];
+      if (!a || typeof a.id !== "string" || !Array.isArray(a.tracks) || a.tracks.length === 0) continue;
+      const def = {
+        id: a.id,
+        name: (typeof a.name === "string") ? a.name : a.id,
+        kind: (a.kind === "loop") ? "loop" : "oneshot",
+        durationMs: (typeof a.durationMs === "number" && a.durationMs > 0) ? a.durationMs : 1500,
+        tracks: a.tracks
+      };
+      list.push(def);
+      map[def.id] = def;
+    }
+    if (list.length === 0) return false;
+    ANIMATIONS = list;
+    animById = map;
+    activeOneShot = null;
+    activeLoops.length = 0;
+    return true;
+  }
+
+  /**
+   * Android → 页面：播放一个动画。
+   * @param id model-profile.json 里 animations[].id
+   */
+  window.__mikuLive2DPlayAnimation = function(id) {
+    const def = animById[id];
+    if (!def) {
+      LOG.w(M.MOTION, "动画不存在", "id=" + id + " 可用=" + Object.keys(animById).join(","));
+      return false;
+    }
+    const nowSec = performance.now() / 1000;
+    if (def.kind === "loop") {
+      // 幂等：同名 loop 不重复入队，否则会越叠越快
+      for (let i = 0; i < activeLoops.length; i++) {
+        if (activeLoops[i].def.id === id) return true;
+      }
+      activeLoops.push({ def: def, startSec: nowSec });
+    } else {
+      activeOneShot = { def: def, startSec: nowSec };
+    }
+    LOG.i(M.MOTION, "播放动画", "id=" + id + " name=" + def.name + " kind=" + def.kind + " ms=" + def.durationMs);
+    return true;
+  };
+
+  /** Android → 页面：停止一个动画（oneshot 停当前，loop 按 id 移除） */
+  window.__mikuLive2DStopAnimation = function(id) {
+    if (id === undefined || id === null || id === "") {
+      activeOneShot = null;
+      activeLoops.length = 0;
+      LOG.i(M.MOTION, "已停止全部动画");
+      return true;
+    }
+    if (activeOneShot && activeOneShot.def.id === id) activeOneShot = null;
+    for (let i = activeLoops.length - 1; i >= 0; i--) {
+      if (activeLoops[i].def.id === id) {
+        for (let k = 0; k < activeLoops[i].def.tracks.length; k++) {
+          setParam(activeLoops[i].def.tracks[k].param, 0);
+        }
+        activeLoops.splice(i, 1);
+      }
+    }
+    LOG.i(M.MOTION, "已停止动画", "id=" + id);
+    return true;
+  };
+
+  window.__mikuLive2DListAnimations = function() {
+    const out = [];
+    for (let i = 0; i < ANIMATIONS.length; i++) out.push(ANIMATIONS[i].id);
+    return out.join(",");
+  };
+
+  // ==================================================================
+  // v1.7.2：角色人设（AI 角色系统 P1）
+  //
+  // P1 只做「装载 + 把语义槽位接到动画 id」。情绪引擎(P2)/LLM(P4) 尚未接入，
+  // 但接口先立起来，后续不用改格式。
+  // ==================================================================
+
+  let activePersona = null;
+
+  /** 从人设的某个槽位里随机取一个动画 id 并播放；返回是否播成功 */
+  function playPersonaSlot(slot) {
+    if (!activePersona || !activePersona.animations) return false;
+    const arr = activePersona.animations[slot];
+    if (!Array.isArray(arr) || arr.length === 0) return false;
+    const id = arr[Math.floor(Math.random() * arr.length)];
+    return window.__mikuLive2DPlayAnimation(id);
+  }
+
+  /**
+   * Android → 页面：装载角色人设。
+   * ★ 只存不判：动画 id 是否存在于 model-profile 由 playAnimation 兜底告警，
+   *   这里不做交叉校验 —— 人设与模型档案本来就是两份可独立替换的文件。
+   */
+  window.__mikuLive2DApplyPersona = function(persona) {
+    try {
+      if (!persona || typeof persona.id !== "string") {
+        LOG.w(M.AI, "人设无效，保持当前角色", "got=" + (persona ? typeof persona : "null"));
+        return false;
+      }
+      activePersona = persona;
+      // 待机循环：人设指定了就起，没指定就沿用内置的
+      if (persona.animations && Array.isArray(persona.animations.onIdle)) {
+        for (let i = 0; i < persona.animations.onIdle.length; i++) {
+          window.__mikuLive2DPlayAnimation(persona.animations.onIdle[i]);
+        }
+      }
+      LOG.i(M.AI, "人设已装载",
+        "id=" + persona.id + " name=" + (persona.name || "") +
+        " 动画库=" + ANIMATIONS.length + " 待机槽=" +
+        (persona.animations && persona.animations.onIdle ? persona.animations.onIdle.join("/") : "无"));
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "人设装载失败", "err=" + (e && e.message ? e.message : e));
+      return false;
+    }
+  };
+
+  window.__mikuLive2DGetPersona = function() {
+    return activePersona ? activePersona.id : "";
+  };
+
+  // v1.7.2：把「按人设槽位播动画」暴露给 Android（试播按钮 / 后续情绪引擎用）
+  window.__mikuLive2DPlayPersonaSlot = function(slot) {
+    const ok = playPersonaSlot(slot);
+    if (!ok) {
+      LOG.w(M.AI, "人设槽位无可用动画", "slot=" + slot +
+        " 当前角色=" + (activePersona ? activePersona.id : "无"));
+    }
+    return ok;
   };
 
   let activeAction = null;          // 当前正在播放的自带动作
@@ -1162,6 +1392,10 @@
   /** 点击模型：随机播一个模型自带动作/表情（R3） */
   async function reactToTap() {
     try {
+      // v1.7.2：人设若定义了 onTap 动画槽，优先播它（关键帧动画表现力更好）；
+      // 没定义 / 播失败则回落到下面原有的 actions 路径 —— 保证行为不退化。
+      if (playPersonaSlot("onTap")) return true;
+
       if (usingDefaultMotions || motionList.length === 0) {
         // 本模型走这条分支：没有 model3.json 动作段，用参数驱动的自带动作
         const ok = playModelAction();
@@ -2425,6 +2659,10 @@
     // 渲染开始之前完成，否则第一帧会闪出水印。
     installWatermarkSuppressor();
     forceWatermarkOff();
+
+    // v1.7.2：安装关键帧动画帧写入器。同样必须挂 beforeModelUpdate ——
+    // 挂 ticker 会被参数求值覆盖（与上面水印压制同源的原因）。
+    installAnimationTicker();
 
     // v1.3.0：加载完成汇总。这条是排查「模型没显示」时的第一条线索，
     // 一眼就能看出尺寸/位置/水印/触摸四项状态是否正常。
