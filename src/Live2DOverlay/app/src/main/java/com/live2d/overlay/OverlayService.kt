@@ -132,6 +132,19 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         const val ACTION_SOULLINK_MESSAGE = "com.live2d.overlay.action.SOULLINK_MESSAGE"
 
+        /**
+         * v1.7.13：播放一次「对话表演」。
+         *
+         * 与 `ACTION_SOULLINK_MESSAGE` 的区别：
+         * - `MESSAGE` 传**文本**，页面侧走 `sendMessage` 文本分类（本地规则）
+         * - `PERFORM` 传**语义层 JSON**（emotion/intensity/durationMs/cues/hints），
+         *   页面侧走 `SpeechPerformancePlanner.plan()` → `startSpeechPerformance()`
+         *
+         * 为什么 LLM 的结果走这条：docs/34 调研确认 `SpeechPerformancePlan` 的
+         * 手势模板/曲线/通道幅度全由 engine 本地决定，LLM 只该提供语义层。
+         */
+        const val ACTION_SOULLINK_PERFORM = "com.live2d.overlay.action.SOULLINK_PERFORM"
+
         /** v1.4.0：仅更新窗口透明度，不重载页面（Bug-A 修复配套） */
         const val ACTION_SET_ALPHA = "com.live2d.overlay.action.SET_ALPHA"
 
@@ -301,6 +314,21 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                     evalJsQuiet(
                         "window.__mikuLive2DSoullinkMessage && window.__mikuLive2DSoullinkMessage('$safe')")
                     L2DLog.i(L2DLog.Mod.AI, "Soullink 消息已投递", "chars=${text.length} text=$text")
+                }
+                return START_STICKY
+            }
+            ACTION_SOULLINK_PERFORM -> {
+                // v1.7.13：语义层 JSON 直接进页面，走 planner.plan → startSpeechPerformance。
+                // 用 JSONObject.quote() 做 JS 字符串转义 —— 比手写 replace 链更可靠
+                // （能正确处理引号、反斜杠、控制字符与 Unicode 行分隔符）。
+                val json = intent.getStringExtra("json")
+                if (json.isNullOrBlank()) {
+                    L2DLog.w(L2DLog.Mod.AI, "对话表演入参为空，已忽略")
+                } else {
+                    val quoted = org.json.JSONObject.quote(json)
+                    evalJsQuiet(
+                        "window.__mikuLive2DSoullinkPerform && window.__mikuLive2DSoullinkPerform($quoted)")
+                    L2DLog.i(L2DLog.Mod.AI, "对话表演已投递", "bytes=${json.length}")
                 }
                 return START_STICKY
             }

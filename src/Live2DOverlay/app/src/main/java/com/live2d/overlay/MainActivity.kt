@@ -722,7 +722,16 @@ class MainActivity : AppCompatActivity() {
         // 预设 4 条覆盖分类器的不同分支（好消息→happy / 夸夸→shy / 生气→anger / 累→tired）。
         // 之所以要预设按钮：adb 的 `input text` **打不了中文**，靠输入框没法自动化验收。
         binding.btnSoullinkSend.setOnClickListener {
-            sendSoullinkMessage(binding.etSoullinkMsg.text?.toString())
+            val text = binding.etSoullinkMsg.text?.toString()?.trim().orEmpty()
+            if (text.isEmpty()) {
+                toast("消息为空")
+            } else if (SecureKeyStore.hasKey(this)) {
+                // v1.7.13：配了 LLM 就走真实对话（LLM 出语义 → 页面编译成表演）
+                askLlmAndPerform(text)
+            } else {
+                // 没配 LLM 时退回 v1.7.7 的本地路径，保证能力不退化
+                sendSoullinkMessage(text)
+            }
         }
         binding.btnEmoHappy.setOnClickListener { sendSoullinkMessage("好消息！项目成功通过了") }
         binding.btnEmoShy.setOnClickListener { sendSoullinkMessage("你真可爱，好喜欢你") }
@@ -763,6 +772,65 @@ class MainActivity : AppCompatActivity() {
     // · 保存后立刻清空输入框，不留明文
     // ==================================================================
 
+    /** v1.7.13：对话历史（内存态，只留最近 6 轮 = 12 条；进程结束即丢） */
+    private val llmHistory = mutableListOf<Pair<String, String>>()
+
+    /**
+     * v1.7.13：走真实 LLM 的一轮对话 —— **LLM 只出语义，页面把它编译成有时长的表演**。
+     *
+     * 为什么是「LLM 只出语义」（docs/34 调研结论）：
+     * `SpeechPerformancePlan` 的手势模板 / 曲线 / 通道幅度**全部由 engine 本地规则
+     * + seededRandom 决定**；LLM 能注入的只有 emotion/intensity/confidence/
+     * durationMs/semanticCues/deliveryHints 这几个字段。
+     *
+     * 历史只留最近 6 轮（与 `LlmClient` 的 `takeLast(6)` 一致），避免无谓 token 消耗。
+     */
+    private fun askLlmAndPerform(userText: String) {
+        if (!config.soullinkEnabled) {
+            // ★ 必须记日志：只 toast 的话「对话没反应」在日志里查不到原因（踩过）
+            L2DLog.w(L2DLog.Mod.AI, "对话未发起：Soullink 未开启")
+            toast("请先开启 Soullink 情绪引擎")
+            return
+        }
+        if (!OverlayService.isRunning) {
+            L2DLog.w(L2DLog.Mod.AI, "对话未发起：悬浮窗未运行")
+            toast("请先启用悬浮窗")
+            return
+        }
+        binding.tvLlmStatus.text = "思考中…"
+        LlmClient.converse(this, userText, llmHistory) { sem, err ->
+            runOnUiThread {
+                if (sem == null) {
+                    binding.tvLlmStatus.text = "❌ $err"
+                    toast("LLM 失败：$err")
+                    return@runOnUiThread
+                }
+                llmHistory.add("user" to userText)
+                llmHistory.add("assistant" to sem.reply)
+                while (llmHistory.size > 12) llmHistory.removeAt(0)
+
+                binding.tvLlmStatus.text = "角色：${sem.reply}\n" +
+                        "（${sem.emotion} · 强度${"%.2f".format(sem.intensity)} · " +
+                        "时长${sem.durationMs}ms · 往返${sem.latencyMs}ms）"
+
+                val json = org.json.JSONObject().apply {
+                    put("emotion", sem.emotion)
+                    put("intensity", sem.intensity)
+                    put("confidence", sem.confidence)
+                    put("durationMs", sem.durationMs)
+                    put("semanticCues", org.json.JSONArray(sem.semanticCues))
+                    put("deliveryHints", org.json.JSONArray(sem.deliveryHints))
+                    put("reply", sem.reply)
+                }.toString()
+                safeStartService(Intent(this, OverlayService::class.java).apply {
+                    setAction(OverlayService.ACTION_SOULLINK_PERFORM)
+                    putExtra("json", json)
+                })
+                binding.etSoullinkMsg.text?.clear()
+            }
+        }
+    }
+
     private fun setupLlm() {
         if (!SecureKeyStore.available(this)) {
             binding.tvLlmStatus.text = "⚠️ 加密存储不可用（Keystore 异常），无法保存凭据"
@@ -772,6 +840,7 @@ class MainActivity : AppCompatActivity() {
         }
         importLlmCredsIfDebug()
         refreshLlmView()
+        debugSayIfRequested()
 
         binding.btnLlmSave.setOnClickListener {
             val typed = binding.etLlmKey.text?.toString()?.trim().orEmpty()
@@ -816,6 +885,43 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * v1.7.13 · **仅 debug 构建**：用文件触发一轮真实对话，便于自动化验证。
+     *
+     * 为什么需要：本机 MIUI 的 UI 自动化点不到「发送」按钮（dump 截断 + ScrollView
+     * 不响应合成 swipe），而「LLM → ACTION_SOULLINK_PERFORM → planner.plan →
+     * startSpeechPerformance」这条链必须能自动化验证。
+     *
+     * 安全边界同 [importLlmCredsIfDebug]：`BuildConfig.DEBUG` 守卫 + 读完即删 + 不记原文。
+     * 文件内容就是「用户说的话」（纯文本）。
+     */
+    private fun debugSayIfRequested() {
+        if (!BuildConfig.DEBUG) return
+        val f = java.io.File("/sdcard/Live2DModels/llm-say.txt")
+        if (!f.isFile) return
+        val text = try {
+            f.readText().trim()
+        } catch (t: Throwable) {
+            L2DLog.e(L2DLog.Mod.AI, "读取 llm-say.txt 失败", "err=${t.javaClass.simpleName}", t)
+            ""
+        } finally {
+            val deleted = f.delete()
+            L2DLog.i(L2DLog.Mod.AI, "llm-say.txt 已清理", "deleted=$deleted")
+        }
+        if (text.isEmpty()) {
+            L2DLog.w(L2DLog.Mod.AI, "llm-say.txt 内容为空，忽略")
+            return
+        }
+        L2DLog.i(L2DLog.Mod.AI, "调试触发一轮对话（DEBUG）", "chars=${text.length}")
+        // 悬浮窗没开就先开 —— 否则 askLlmAndPerform 会因 isRunning=false 直接返回
+        if (!OverlayService.isRunning) {
+            L2DLog.i(L2DLog.Mod.AI, "调试钩子：悬浮窗未运行，先启动")
+            startOverlay()
+        }
+        // 延后 8 秒：等服务起来 + 页面加载完 + Soullink 引擎就绪
+        binding.root.postDelayed({ askLlmAndPerform(text) }, 8000)
     }
 
     /**

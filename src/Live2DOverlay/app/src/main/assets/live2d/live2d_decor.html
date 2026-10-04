@@ -1566,6 +1566,100 @@
     }
   }
 
+  // ==================================================================
+  // v1.7.13：对话表演 —— 把 Kotlin 侧 LLM 的「语义层」编译成有时长的表演
+  //
+  // ★ 为什么只传语义、不传参数：
+  //   docs/34 调研确认 SpeechPerformancePlan 的手势模板/曲线/通道幅度
+  //   全部由 engine 本地规则 + seededRandom 决定；LLM 只能注入
+  //   emotion/intensity/confidence/durationMs/semanticCues/deliveryHints。
+  //   白名单在这里做**第三次**过滤（Kotlin 提示词一次、Kotlin 解析一次、这里一次）。
+  // ==================================================================
+
+  /** 与上游 SpeechPerformancePlanner.ts:479-480 逐字一致 */
+  const SL_CUES = ["agreement", "reassurance", "question", "reflection", "uncertainty",
+                   "affection", "emphasis", "contrast", "surprise", "tension", "sadness"];
+  const SL_HINTS = ["acknowledge", "reassure", "ask", "reflect", "hesitate",
+                    "confide", "emphasize", "celebrate", "warn"];
+
+  /** 对话轮次计数：喂给 createSpeechPerformanceSeed，让同一轮可复现、不同轮有变化 */
+  let slTurnOrdinal = 0;
+
+  /**
+   * Android → 页面：播放一次对话表演。
+   * @param {string|object} json 语义层，形如
+   *   {emotion, intensity, confidence, durationMs, semanticCues, deliveryHints, reply}
+   */
+  window.__mikuLive2DSoullinkPerform = function(json) {
+    if (!soullinkReady || !soullinkRuntime) {
+      LOG.w(M.AI, "Soullink 未就绪，对话表演已丢弃", "ready=" + soullinkReady);
+      return false;
+    }
+    const planner = ensureSoullinkPlanner();
+    if (!planner) return false;
+
+    let req;
+    try {
+      req = (typeof json === "string") ? JSON.parse(json) : (json || {});
+    } catch (e) {
+      LOG.w(M.AI, "对话表演入参不是合法 JSON", "err=" + (e && e.message));
+      return false;
+    }
+
+    try {
+      const now = performance.now() / 1000;
+      const lib = window.SoullinkEmotion;
+
+      // capabilities：仍从档案推导（只启用模型真有的通道）+ profile 的幅度覆盖
+      let caps = (soullinkProfile && soullinkProfile.performanceCapabilities) || {};
+      if (lib && typeof lib.deriveSpeechPerformanceCapabilities === "function") {
+        caps = lib.deriveSpeechPerformanceCapabilities(soullinkProfile || {}, caps);
+      }
+
+      const cues = Array.isArray(req.semanticCues)
+        ? req.semanticCues.filter(function(c) { return SL_CUES.indexOf(c) >= 0; }) : [];
+      const hints = Array.isArray(req.deliveryHints)
+        ? req.deliveryHints.filter(function(h) { return SL_HINTS.indexOf(h) >= 0; }) : [];
+      const emotion = String(req.emotion || "neutral");
+      const durationMs = Math.max(1200, Math.min(12000, Number(req.durationMs) || 3000));
+
+      slTurnOrdinal++;
+      const seed = (lib && typeof lib.createSpeechPerformanceSeed === "function")
+        ? lib.createSpeechPerformanceSeed({
+            turnOrdinal: slTurnOrdinal, segmentOrdinal: 0,
+            emotion: emotion, durationMs: durationMs, revision: 1 })
+        : Math.floor(Math.random() * 0x7fffffff);
+
+      const plan = planner.plan({
+        emotion: emotion,
+        intensity: Math.max(0, Math.min(1, Number(req.intensity) || 0.6)),
+        confidence: Math.max(0, Math.min(1, Number(req.confidence) || 0.8)),
+        durationMs: durationMs,
+        semanticCues: cues,
+        deliveryHints: hints,
+        turnOrdinal: slTurnOrdinal,
+        segmentOrdinal: 0,
+        revision: 1,
+        capabilities: caps,
+        seed: seed
+      });
+
+      const ok = soullinkRuntime.startSpeechPerformance(plan, now);
+      LOG.i(M.AI, "已播放对话表演",
+        "第" + slTurnOrdinal + "轮 emotion=" + plan.emotion +
+        " 时长=" + Math.round(plan.durationMs) + "ms" +
+        " 手势=" + (plan.gestures ? plan.gestures.length : 0) +
+        " cues=[" + cues.join("/") + "] hints=[" + hints.join("/") + "]" +
+        " 接受=" + ok);
+      // 刚演完，把下一次自发表演推后，避免紧接着又自动来一次
+      slAutoPulseAt = now + durationMs / 1000 + 6 + Math.random() * 10;
+      return ok;
+    } catch (e) {
+      LOG.w(M.AI, "对话表演失败", "err=" + (e && e.message));
+      return false;
+    }
+  };
+
   /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
   function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
