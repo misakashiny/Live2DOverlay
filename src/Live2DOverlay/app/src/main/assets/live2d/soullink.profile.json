@@ -26,7 +26,8 @@
       "v1.7.6c：leanForward V 门槛→0.70（避免 A>0.44 时独占常开）；heart 窗口下移到 A[0.28,0.40] 与 sing 错开",
       "v1.7.7b：点击会把 VAD 推高导致姿态锁死 → hold 12→6s、decay 0.26→0.34",
       "v1.7.7c：leanForward 改为只在 A[0.62,0.90] 出现（待机不该一直前倾）；spin A[0.20,0.36] / qqMode A[0.34,0.60]",
-      "v1.7.7d：姿态 intensity 0.95→0.75（部分呈现，避免全开锁死）"
+      "v1.7.7d：姿态 intensity 0.95→0.75（部分呈现，避免全开锁死）",
+      "v1.7.8b：移除 privateEmotionMap.leanForward —— 它是唯一反复锁死 100% 的姿态（VAD 被表演推高后窗口长期满足），且「一直前倾」不像待机。exp3 文件仍在，只是不参与自动轮换。"
     ]
   },
   "schemaVersion": 2,
@@ -406,31 +407,6 @@
       "exclusiveGroup": "miku_pose",
       "source": "manual",
       "confidence": 0.9
-    },
-    "leanForward": {
-      "target": "Param132",
-      "emotions": [
-        "curious",
-        "affectionate"
-      ],
-      "triggerMode": "any",
-      "vadRange": {
-        "valence": [
-          0.6,
-          1
-        ],
-        "arousal": [
-          0.62,
-          0.9
-        ]
-      },
-      "activeValue": 1,
-      "neutralValue": 0,
-      "intensity": 0.75,
-      "priority": 40,
-      "exclusiveGroup": "miku_pose",
-      "source": "manual",
-      "confidence": 0.85
     },
     "scallion": {
       "target": "Param133",
