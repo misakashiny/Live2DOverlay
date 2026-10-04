@@ -1,15 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-    <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/main_tabs"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/bg_dark"
-            app:tabMode="fixed"
-            app:tabGravity="fill"
-            app:tabIndicatorColor="@color/accent"
-            app:tabSelectedTextColor="@color/text_primary"
-            app:tabTextColor="@color/text_secondary" />
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -39,7 +28,6 @@
             android:textSize="13sp" />
 
         <!-- ============ 状态卡片 ============ -->
-        <LinearLayout android:id="@+id/tab_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
         <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -203,8 +191,6 @@
         </LinearLayout>
 
         <!-- ============ 角色人设（v1.7.2 / AI 角色系统 P1） ============ -->
-        </LinearLayout>
-        <LinearLayout android:id="@+id/tab_character" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
         <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -542,8 +528,6 @@
         </LinearLayout>
 
         <!-- ============ 显示参数 ============ -->
-        </LinearLayout>
-        <LinearLayout android:id="@+id/tab_display" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
         <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -955,8 +939,6 @@
         </LinearLayout>
 
         <!-- ============ 运行日志（v1.3.0） ============ -->
-        </LinearLayout>
-        <LinearLayout android:id="@+id/tab_log" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
         <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -1178,7 +1160,5 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        </LinearLayout>
     </LinearLayout>
 </ScrollView>
-    </LinearLayout>

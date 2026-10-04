@@ -148,7 +148,6 @@ class MainActivity : AppCompatActivity() {
         setupLogPanel()
         setupPersona()
         setupLlm()
-        setupTabs()
         maybeRequestNotification()
     }
 
@@ -874,32 +873,6 @@ class MainActivity : AppCompatActivity() {
     //
     // 为什么不用 Fragment：这些区块共享同一个 Activity 的 binding 与状态，
     // 拆 Fragment 要引入 ViewModel/通信，收益不抵成本。切 visibility 足够。
-    // ==================================================================
-
-    private fun setupTabs() {
-        val tabs = binding.mainTabs
-        val pages = listOf(
-            binding.tabStatus to "状态",
-            binding.tabCharacter to "角色",
-            binding.tabDisplay to "显示",
-            binding.tabLog to "日志"
-        )
-        // 初始只显示第一个
-        pages.forEachIndexed { i, (view, title) ->
-            tabs.addTab(tabs.newTab().setText(title))
-            view.visibility = if (i == 0) android.view.View.VISIBLE else android.view.View.GONE
-        }
-        tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
-                pages.forEachIndexed { i, (view, _) ->
-                    view.visibility = if (i == tab.position) android.view.View.VISIBLE else android.view.View.GONE
-                }
-            }
-            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
-            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
-        })
-        L2DLog.i(L2DLog.Mod.UI, "分栏已就绪", "tabs=${pages.size}")
-    }
 
     private fun setupLlm() {
         if (!SecureKeyStore.available(this)) {
