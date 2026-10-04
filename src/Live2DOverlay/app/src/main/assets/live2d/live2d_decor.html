@@ -2037,6 +2037,20 @@
           emotionPersonality: (profile && profile.emotionPersonality) ? profile.emotionPersonality : undefined
         });
 
+        // ★ v1.7.22：身体动作增益 —— 用户反馈「只有点头摇头、身体没啥动作」。
+        //   根因：引擎默认 bodyMotionGain=1.25（比 parameterGain 1.45 还小），
+        //   而它消费在 VADGestureController（手势）与 VADMicroMotionController（微动）——
+        //   正是身体动作的来源。上限是 4，有 3 倍空间。
+        //   实测差距：AngleZ Δ46 vs BodyAngleX Δ5.7（差 8 倍）。
+        //   同时 bodyX/Y/Z 的 scale 从 42 提到 70（满量程 ±12 相对头部 ±30 偏小）。
+        try {
+          const bg = (profile && profile.bodyMotionGain !== undefined) ? profile.bodyMotionGain : 3.5;
+          soullinkRuntime.setBodyMotionGain(bg);
+          LOG.i(M.AI, "身体动作增益已设置", "bodyMotionGain=" + bg + "（引擎默认 1.25，上限 4）");
+        } catch (e) {
+          LOG.w(M.AI, "设置身体动作增益失败", "err=" + (e && e.message));
+        }
+
         // ★ 让位：清空内置关键帧动画，避免与引擎抢同一批参数
         ANIMATIONS = [];
         animById = Object.create(null);

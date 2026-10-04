@@ -33,7 +33,8 @@
       "v1.7.20：scale head 60→85 / body 28→42 / gaze 2.5→4；idleActionGain 1.55→1.9、microMotionGain 1.5→1.9；★ 姿态 valence 下限 0.42→0.30（这是姿态几乎不出现的主因）；intensity→0.95",
       "v1.7.21：qqMode V0.30→0.52 A0.34→0.44（用户反馈太频繁）；spin A 下限 0.20→0.26",
       "v1.7.22：改用「同组 A 窗口不重叠切分」而不是抬高单个门槛 —— miku_pose: spin A[0.20,0.32] / qqMode A[0.31,0.44]；miku_prop: scallion A[0.20,0.30] / sing A[0.29,0.40] / heart A[0.39,0.52]",
-      "v1.7.23：所有姿态 V 下限 0.30→0.55 —— 姿态语义上是「反应」而非「待机状态」；待机 V≈0.40 时不出现，只有点击/对话/表演推高 V 时才出现"
+      "v1.7.23：所有姿态 V 下限 0.30→0.55 —— 姿态语义上是「反应」而非「待机状态」；待机 V≈0.40 时不出现，只有点击/对话/表演推高 V 时才出现",
+      "v1.7.22：身体动作增益 bodyMotionGain=3.5（引擎默认 1.25，上限 4）；bodyX/Y/Z scale 42→70 —— 用户反馈「只有点头摇头、身体没啥动作」"
     ]
   },
   "schemaVersion": 2,
@@ -134,21 +135,21 @@
     "bodyX": {
       "target": "ParamBodyAngleX",
       "mode": "set",
-      "scale": 42,
+      "scale": 70,
       "min": -12,
       "max": 12
     },
     "bodyY": {
       "target": "ParamBodyAngleY",
       "mode": "set",
-      "scale": 42,
+      "scale": 70,
       "min": -12,
       "max": 12
     },
     "bodyZ": {
       "target": "ParamBodyAngleZ",
       "mode": "set",
-      "scale": 42,
+      "scale": 70,
       "min": -12,
       "max": 12
     },
@@ -528,5 +529,6 @@
       "maxMotionDensity": 0.95,
       "minRestWindowMs": 60
     }
-  }
+  },
+  "bodyMotionGain": 3.5
 }

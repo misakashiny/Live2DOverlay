@@ -14,8 +14,8 @@ android {
         applicationId = "com.live2d.overlay"
         minSdk = 24
         targetSdk = 34
-        versionCode = 28
-        versionName = "1.7.21"
+        versionCode = 29
+        versionName = "1.7.22"
     }
 
     androidResources {
