@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+    <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/main_tabs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/bg_dark"
+            app:tabMode="fixed"
+            app:tabGravity="fill"
+            app:tabIndicatorColor="@color/accent"
+            app:tabSelectedTextColor="@color/text_primary"
+            app:tabTextColor="@color/text_secondary" />
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -28,7 +39,8 @@
             android:textSize="13sp" />
 
         <!-- ============ 状态卡片 ============ -->
-        <LinearLayout
+        <LinearLayout android:id="@+id/tab_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
@@ -127,7 +139,7 @@
         </LinearLayout>
 
         <!-- ============ 模型卡片 ============ -->
-        <LinearLayout
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -191,7 +203,9 @@
         </LinearLayout>
 
         <!-- ============ 角色人设（v1.7.2 / AI 角色系统 P1） ============ -->
-        <LinearLayout
+        </LinearLayout>
+        <LinearLayout android:id="@+id/tab_character" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -454,6 +468,27 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
+            <!-- v1.7.18：语音开关 —— 每次对话都合成语音会消耗 TTS 配额，给一个总开关 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="对话时自动朗读（TTS）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Switch
+                    android:id="@+id/switch_voice"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -507,7 +542,9 @@
         </LinearLayout>
 
         <!-- ============ 显示参数 ============ -->
-        <LinearLayout
+        </LinearLayout>
+        <LinearLayout android:id="@+id/tab_display" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -704,7 +741,7 @@
         </LinearLayout>
 
         <!-- ============ 开关 ============ -->
-        <LinearLayout
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -801,7 +838,7 @@
                 android:textSize="14sp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <LinearLayout style="@style/SectionCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
@@ -918,7 +955,9 @@
         </LinearLayout>
 
         <!-- ============ 运行日志（v1.3.0） ============ -->
-        <LinearLayout
+        </LinearLayout>
+        <LinearLayout android:id="@+id/tab_log" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -1139,5 +1178,7 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>
+    </LinearLayout>

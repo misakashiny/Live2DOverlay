@@ -44,6 +44,9 @@ class OverlayConfig(context: Context) {
         // ---- v1.7.3（实验）----
         const val KEY_SOULLINK_ENABLED = "soullink_enabled" // Soullink 情绪引擎开关
 
+        /** v1.7.18：对话时是否自动朗读（TTS） */
+        const val KEY_VOICE_ENABLED = "voice_enabled"
+
         // ---- 默认值（对齐车机横屏 2560x720 场景）----
         const val DEF_CENTER_X = 1448f
         const val DEF_CENTER_Y = 420f
@@ -185,6 +188,18 @@ class OverlayConfig(context: Context) {
     var soullinkEnabled: Boolean
         get() = prefs.getBoolean(KEY_SOULLINK_ENABLED, false)
         set(v) = prefs.edit().putBoolean(KEY_SOULLINK_ENABLED, v).apply()
+
+    /**
+     * v1.7.18：对话时是否自动朗读（TTS）。
+     *
+     * **默认开启**（用户明确要求「对话时自动朗读」的体验）。
+     * 关掉后 `askLlmAndPerform` 不再调 TTS —— 表演与字幕照常播，
+     * 只是不出声。给这个开关的原因：每次对话都合成语音会消耗百炼 TTS 配额，
+     * 而且安静环境下未必想让它出声。
+     */
+    var voiceEnabled: Boolean
+        get() = prefs.getBoolean(KEY_VOICE_ENABLED, true)
+        set(v) = prefs.edit().putBoolean(KEY_VOICE_ENABLED, v).apply()
 
     /**
      * 构造 WebView 页面 URL。

@@ -148,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         setupLogPanel()
         setupPersona()
         setupLlm()
+        setupTabs()
         maybeRequestNotification()
     }
 
@@ -830,7 +831,8 @@ class MainActivity : AppCompatActivity() {
 
                 // v1.7.16：TTS —— 合成语音后投给页面（页面负责播放 + WebAudio 口型）
                 // 放在表演之后：先让动作起来，语音到了再叠加上去，体感更快。
-                if (SecureKeyStore.hasTts(this)) {
+                // v1.7.18：受「对话时自动朗读」开关控制 —— 关掉后表演与字幕照常，只是不出声。
+                if (config.voiceEnabled && SecureKeyStore.hasTts(this)) {
                     TtsClient.synthesize(this, sem.reply) { speech, terr ->
                         runOnUiThread {
                             if (speech == null) {
@@ -862,6 +864,41 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // ==================================================================
+    // v1.7.18：UI 重做 —— 顶部分栏
+    //
+    // 背景：功能越加越多，界面变成 9 个区块、69 个控件平铺在一个滚动列表里，
+    // 找个开关要滚半天。改成 4 个 Tab，切换时只切 visibility。
+    //
+    // 为什么不用 Fragment：这些区块共享同一个 Activity 的 binding 与状态，
+    // 拆 Fragment 要引入 ViewModel/通信，收益不抵成本。切 visibility 足够。
+    // ==================================================================
+
+    private fun setupTabs() {
+        val tabs = binding.mainTabs
+        val pages = listOf(
+            binding.tabStatus to "状态",
+            binding.tabCharacter to "角色",
+            binding.tabDisplay to "显示",
+            binding.tabLog to "日志"
+        )
+        // 初始只显示第一个
+        pages.forEachIndexed { i, (view, title) ->
+            tabs.addTab(tabs.newTab().setText(title))
+            view.visibility = if (i == 0) android.view.View.VISIBLE else android.view.View.GONE
+        }
+        tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
+                pages.forEachIndexed { i, (view, _) ->
+                    view.visibility = if (i == tab.position) android.view.View.VISIBLE else android.view.View.GONE
+                }
+            }
+            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+        })
+        L2DLog.i(L2DLog.Mod.UI, "分栏已就绪", "tabs=${pages.size}")
     }
 
     private fun setupLlm() {
@@ -898,6 +935,14 @@ class MainActivity : AppCompatActivity() {
             toast(if (ok && okTts) "凭据与语音配置已保存" else "保存失败")
             binding.etLlmKey.text?.clear()   // 保存后立刻清掉，不留明文
             refreshLlmView()
+        }
+
+        // v1.7.18：对话时自动朗读（TTS）总开关
+        binding.switchVoice.isChecked = config.voiceEnabled
+        binding.switchVoice.setOnCheckedChangeListener { _, checked ->
+            config.voiceEnabled = checked
+            L2DLog.i(L2DLog.Mod.AI, "语音朗读开关变更", "enabled=$checked")
+            toast(if (checked) "对话时将自动朗读" else "已静音（表演与字幕照常）")
         }
 
         // v1.7.17：音色快捷选择（用户挑的三个）
