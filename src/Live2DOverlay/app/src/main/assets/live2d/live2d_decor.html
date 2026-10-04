@@ -1585,6 +1585,68 @@
   /** 对话轮次计数：喂给 createSpeechPerformanceSeed，让同一轮可复现、不同轮有变化 */
   let slTurnOrdinal = 0;
 
+  // ==================================================================
+  // v1.7.14：对话字幕（气泡）
+  //
+  // 设计取舍：
+  // ① **不新增原生 action** —— `ACTION_SOULLINK_PERFORM` 已经带着 reply，
+  //    让「台词」与「表演」作为一个整体投递，不会出现「有字幕没动作」的错位。
+  // ② **不新增窗口** —— 用页面内的 DOM 元素。渲染窗口本身是 FLAG_NOT_TOUCHABLE，
+  //    画字没问题；再加一个系统窗口会重新踩 Android 12+ 的 opacity/flag 那套坑。
+  // ③ **不改 HTML 结构** —— 元素由 JS 按需创建，降低改坏页面的风险。
+  // ==================================================================
+
+  let subtitleEl = null;
+  let subtitleTimer = 0;
+
+  function ensureSubtitleEl() {
+    if (subtitleEl) return subtitleEl;
+    const el = document.createElement("div");
+    el.id = "l2dSubtitle";
+    el.style.cssText = [
+      "position:fixed", "left:50%", "transform:translateX(-50%)",
+      "max-width:78vw", "padding:10px 18px",
+      "background:rgba(18,20,28,0.84)", "color:#fff",
+      "font:500 15px/1.55 system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif",
+      "border-radius:14px", "border:1px solid rgba(255,255,255,0.14)",
+      "box-shadow:0 6px 24px rgba(0,0,0,0.38)",
+      "text-align:center", "white-space:pre-wrap", "word-break:break-word",
+      "pointer-events:none", "z-index:99999",
+      "opacity:0", "transition:opacity .22s ease",
+      "bottom:6vh"
+    ].join(";");
+    document.body.appendChild(el);
+    subtitleEl = el;
+    return el;
+  }
+
+  /**
+   * 显示对话字幕，到时淡出。
+   * @param {string} text
+   * @param {number} [holdMs] 停留时长；省略时按字数估（与 LlmClient.estimateDurationMs 同思路）
+   */
+  function showSubtitle(text, holdMs) {
+    const t = String(text == null ? "" : text).trim();
+    if (!t) return;
+    try {
+      const el = ensureSubtitleEl();
+      el.textContent = t;
+      el.style.opacity = "1";
+      if (subtitleTimer) clearTimeout(subtitleTimer);
+      const hold = Math.max(1500, Math.min(12000, Number(holdMs) || (1200 + t.length * 180)));
+      subtitleTimer = setTimeout(function() { el.style.opacity = "0"; }, hold);
+      LOG.i(M.AI, "字幕已显示", "chars=" + t.length + " 停留=" + hold + "ms");
+    } catch (e) {
+      LOG.w(M.AI, "字幕显示失败", "err=" + (e && e.message));
+    }
+  }
+
+  /** Android → 页面：单独显示一条字幕（不触发表演） */
+  window.__mikuLive2DShowSubtitle = function(text, holdMs) {
+    showSubtitle(text, holdMs);
+    return true;
+  };
+
   /**
    * Android → 页面：播放一次对话表演。
    * @param {string|object} json 语义层，形如
@@ -1653,6 +1715,8 @@
         " 接受=" + ok);
       // 刚演完，把下一次自发表演推后，避免紧接着又自动来一次
       slAutoPulseAt = now + durationMs / 1000 + 6 + Math.random() * 10;
+      // v1.7.14：台词与表演同为一个整体 —— 字幕停留时长跟表演时长一致
+      if (req.reply) showSubtitle(req.reply, durationMs);
       return ok;
     } catch (e) {
       LOG.w(M.AI, "对话表演失败", "err=" + (e && e.message));
