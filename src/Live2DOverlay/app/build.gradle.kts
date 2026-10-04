@@ -68,6 +68,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+    // v1.7.12：API Key 加密存储（用户选择「应用内输入 + EncryptedSharedPreferences」）
+    // 底层用 Android Keystore 的 AES-256-GCM，密钥不出 TEE/StrongBox。
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
 
 // ---------------------------------------------------------------------------
