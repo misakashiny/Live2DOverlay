@@ -1881,6 +1881,58 @@
     }
   };
 
+  // ==================================================================
+  // v1.7.21 探针：查 Cubism Core 暴露了什么，用于「摸头/摸手」命中区。
+  //
+  // 背景：model3.json 没有 HitAreas；cdi3.json 只有 78 个 Part（无坐标）；
+  //       vtube.json 的 ArtMeshDetails 全是空数组。
+  //       所以 ArtMesh 列表只能运行时从 moc3 拿 —— 先探清楚有哪些方法可用。
+  // ==================================================================
+  let coreProbed = false;
+
+  function probeCoreModel() {
+    if (coreProbed) return;
+    try {
+      const core = model && model.internalModel && model.internalModel.coreModel;
+      if (!core) return;
+      coreProbed = true;
+      const fns = [];
+      for (const k in core) { if (typeof core[k] === "function" && /Drawable|Part|Parameter/i.test(k)) fns.push(k); }
+      let proto = Object.getPrototypeOf(core), depth = 0;
+      while (proto && depth < 4) {
+        for (const k of Object.getOwnPropertyNames(proto)) {
+          try { if (typeof core[k] === "function" && /Drawable|Part/i.test(k) && fns.indexOf(k) < 0) fns.push(k); } catch (e) {}
+        }
+        proto = Object.getPrototypeOf(proto); depth++;
+      }
+      LOG.i(M.AI, "探针 coreModel 方法", "[" + fns.join(",") + "]");
+      const dc = (typeof core.getDrawableCount === "function") ? core.getDrawableCount() : -1;
+      const pc = (typeof core.getPartCount === "function") ? core.getPartCount() : -1;
+      LOG.i(M.AI, "探针 数量", "drawables=" + dc + " parts=" + pc);
+      if (dc > 0 && typeof core.getDrawableId === "function") {
+        const ids = [];
+        for (let i = 0; i < Math.min(dc, 14); i++) { try { ids.push(core.getDrawableId(i)); } catch (e) { ids.push("ERR"); } }
+        LOG.i(M.AI, "探针 drawableId 前14", ids.join("|"));
+        try {
+          const v = core.getDrawableVertexPositions(0);
+          LOG.i(M.AI, "探针 顶点0", "ctor=" + (v && v.constructor ? v.constructor.name : typeof v) + " len=" + (v ? v.length : -1));
+        } catch (e) { LOG.w(M.AI, "探针 顶点失败", "" + e.message); }
+        if (typeof core.getDrawableParentPartIndex === "function") {
+          const m = [];
+          for (let i = 0; i < Math.min(dc, 14); i++) { try { m.push(core.getDrawableParentPartIndex(i)); } catch (e) { m.push("E"); } }
+          LOG.i(M.AI, "探针 父部件索引 前14", m.join(","));
+        }
+      }
+      if (pc > 0 && typeof core.getPartId === "function") {
+        const ps = [];
+        for (let i = 0; i < Math.min(pc, 14); i++) { try { ps.push(core.getPartId(i)); } catch (e) { ps.push("ERR"); } }
+        LOG.i(M.AI, "探针 partId 前14", ps.join("|"));
+      }
+    } catch (e) {
+      LOG.w(M.AI, "探针失败", "err=" + (e && e.message));
+    }
+  }
+
   /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
   function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
@@ -1971,6 +2023,7 @@
     if (!soullinkReady || !soullinkRuntime) return;
     // v1.7.5：模型就绪后补注入参数信息（见 maybeInjectPrivateParams 的注释）
     maybeInjectPrivateParams();
+    probeCoreModel();   // v1.7.21 探针：模型已就绪，这里才拿得到 coreModel
     // v1.7.10：模型就绪后接管眼部控制（见 maybeTakeOverEyeControl 的注释）
     maybeTakeOverEyeControl();
     const nowSec = performance.now() / 1000;
