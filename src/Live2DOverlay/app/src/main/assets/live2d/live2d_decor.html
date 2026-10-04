@@ -1437,17 +1437,80 @@
   function soullinkAutoPulse(nowSec) {
     if (!soullinkReady) return;
     if (nowSec < slAutoPulseAt) return;
-    // v1.7.7c：间隔 12~30s → 20~45s、强度 0.45~0.75 → 0.30~0.50。
-    // 原因：实测自发表演太频繁/太强会把 VAD 顶到高位，导致 privateEmotionMap 的
-    // 姿态「锁死」在某个区域（连续多个窗口 100%），反而显得僵。
-    // 自发表演的目的是「偶尔做点什么」，不是「一直很亢奋」。
+    // v1.7.8：改走「有时长的表演」（原来走 triggerIntent，会把 VAD 推高导致姿态锁死）
     slAutoPulseAt = nowSec + 20 + Math.random() * 25;
     const pool = SL_IDLE_EMOTIONS;
     const emo = pool[Math.floor(Math.random() * pool.length)];
-    triggerSoullinkEmotion(emo, 0.30 + Math.random() * 0.20, "auto_idle");
+    playSoullinkPerformance(emo, 0.45 + Math.random() * 0.2,
+      2600 + Math.random() * 2200, "auto_idle");
   }
 
-  /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */  function loadSoullinkEngine() {
+  // ==================================================================
+  // v1.7.8：用「有时长的表演」替代「持续推 VAD」
+  //
+  // ★ 用户反馈：「点击不是表情+姿态变化，而是切换到自带的姿势」
+  //
+  //   复盘：v1.7.7 的点击走 triggerIntent → 把 VAD 推到高位并保持
+  //   → privateEmotionMap 的离散参数**跳到某个值并停住**
+  //   → 视觉上就是「换了个姿势」，不是「做了个动作」。
+  //
+  //   根因还是那条：privateEmotionMap 是**持续姿态系统**，没有时长语义。
+  //
+  //   正确载体是 SpeechPerformancePlanner：
+  //     const plan = planner.plan({ emotion, intensity, durationMs, seed });
+  //     runtime.startSpeechPerformance(plan, now);
+  //   plan 自带 durationMs + expression + gestures —— 播完自动结束，
+  //   这才是「一次动作」而不是「换一个姿势」。
+  // ==================================================================
+
+  let slPlanner = null;
+
+  function ensureSoullinkPlanner() {
+    if (slPlanner) return slPlanner;
+    const lib = window.SoullinkEmotion;
+    if (!lib || typeof lib.SpeechPerformancePlanner !== "function") return null;
+    try {
+      slPlanner = new lib.SpeechPerformancePlanner();
+      LOG.i(M.AI, "表演编排器已就绪", "SpeechPerformancePlanner");
+    } catch (e) {
+      LOG.w(M.AI, "表演编排器创建失败", "err=" + (e && e.message));
+    }
+    return slPlanner;
+  }
+
+  /**
+   * 播一次有时长的表演（表情 + 手势），到点自动结束。
+   * @param {string} emotion
+   * @param {number} intensity 0~1
+   * @param {number} durationMs 表演时长
+   * @param {string} tag 来源标记
+   */
+  function playSoullinkPerformance(emotion, intensity, durationMs, tag) {
+    if (!soullinkReady || !soullinkRuntime) return false;
+    const planner = ensureSoullinkPlanner();
+    if (!planner) return false;
+    try {
+      const now = performance.now() / 1000;
+      const plan = planner.plan({
+        emotion: emotion,
+        intensity: intensity,
+        durationMs: durationMs,
+        seed: Math.floor(Math.random() * 0x7fffffff)
+      });
+      const ok = soullinkRuntime.startSpeechPerformance(plan, now);
+      LOG.i(M.AI, "已播放表演",
+        "emotion=" + emotion + " 时长=" + Math.round(plan.durationMs) + "ms" +
+        " 手势=" + (plan.gestures ? plan.gestures.length : 0) +
+        " 强度=" + intensity.toFixed(2) + " 来源=" + tag + " 接受=" + ok);
+      return ok;
+    } catch (e) {
+      LOG.w(M.AI, "播放表演失败", "emotion=" + emotion + " err=" + (e && e.message));
+      return false;
+    }
+  }
+
+  /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
+  function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
       if (window.SoullinkEmotion) return resolve(window.SoullinkEmotion);
       const s = document.createElement("script");
@@ -1798,12 +1861,17 @@
       //   正确做法：把点击转成一次 triggerIntent（仓库文档 packages/README.md §4）。
       if (soullinkReady) {
         const now = performance.now() / 1000;
-        // 限流 260ms：连点不该把 VAD 顶爆，但也不能毫无反应
+        // 限流 260ms：连点不该把表演队列堆爆，但也不能毫无反应
         if (now - slLastTapAt < 0.26) return true;
         slLastTapAt = now;
         const pool = SL_TAP_EMOTIONS;
         const emo = pool[Math.floor(Math.random() * pool.length)];
-        triggerSoullinkEmotion(emo, 0.75 + Math.random() * 0.2, "tap");
+        // ★ v1.7.8：走「有时长的表演」而不是 triggerIntent。
+        //   用户反馈「点击是切换到自带的姿势」—— 因为 triggerIntent 把 VAD 推高并保持，
+        //   privateEmotionMap 的离散参数就跳到某个值停住。
+        //   表演有 durationMs，播完自动结束，视觉上才是「做了一次动作」。
+        playSoullinkPerformance(emo, 0.75 + Math.random() * 0.2,
+          1600 + Math.random() * 1000, "tap");
         // 点击顺带把下一次自发表演推后，避免刚点完又自动来一次
         slAutoPulseAt = now + 10 + Math.random() * 12;
         return true;
