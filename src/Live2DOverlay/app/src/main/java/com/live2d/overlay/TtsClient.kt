@@ -98,8 +98,14 @@ object TtsClient {
                     .put("input", JSONObject()
                         .put("text", t)
                         .put("voice", voice)
-                        .put("format", "wav")
-                        .put("sample_rate", 24000))
+                        // ★ v1.7.17：用 mp3 而不是 wav。
+                        //   实测 wav 24kHz 三秒 = 244KB，base64 后 332K 字符；
+                        //   而 Java String 是 UTF-16，塞进 Intent extra 时按 665KB 算，
+                        //   顶到 Binder 1MB 事务上限 → 语音投递失败（服务侧一条日志都没有）。
+                        //   mp3 同长度约 1/6 体积，Intent 与 evaluateJavascript 都轻松。
+                        .put("format", "mp3")
+                        // 24kHz → 16kHz：语音够用，体积降 1/3，缓解 Intent/Binder 压力
+                        .put("sample_rate", 16000))
                     .toString()
                 val url = "$baseUrl/api/v1/services/aigc/multimodal-generation/generation"
                 val resp = postJson(url, apiKey, body)
@@ -192,7 +198,19 @@ object TtsClient {
             val mime = head.substringBefore(';').ifBlank { "audio/wav" }
             return Base64.decode(url.substring(comma + 1), Base64.DEFAULT) to mime
         }
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+        // ★ v1.7.17：百炼返回的音频是 OSS 的 **http** 链接，而 Android 9+ 默认禁止明文 HTTP
+        //   （实测报 `Cleartext HTTP traffic to dashscope-result-bj.oss-cn-beijing.aliyuncs.com
+        //   not permitted`）。OSS 全部支持 HTTPS，所以直接把 scheme 换掉 ——
+        //   比在 Manifest 上开 usesCleartextTraffic 或加 network-security-config 更干净：
+        //   **不放宽任何安全策略**。
+        val safeUrl = if (url.startsWith("http://")) {
+            val upgraded = "https://" + url.removePrefix("http://")
+            L2DLog.i(L2DLog.Mod.AI, "音频链接已升级为 HTTPS",
+                "host=" + java.net.URI(upgraded).host)
+            upgraded
+        } else url
+
+        val conn = (URL(safeUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
             readTimeout = 60_000

@@ -838,10 +838,24 @@ class MainActivity : AppCompatActivity() {
                                 L2DLog.w(L2DLog.Mod.AI, "TTS 未播放", "err=$terr")
                                 toast("语音合成失败（表演与字幕已播）")
                             } else {
-                                safeStartService(Intent(this, OverlayService::class.java).apply {
-                                    setAction(OverlayService.ACTION_SOULLINK_SPEAK)
-                                    putExtra("dataUrl", speech.dataUrl)
-                                })
+                                // ★ v1.7.17：这里必须 try/catch + 记日志。
+                                //   踩过的坑：data URL 有 31 万字符，而 Java String 是 UTF-16，
+                                //   塞进 Intent extra 时按 ~62 万字节算，顶到 Binder 1MB 事务上限，
+                                //   safeStartService 抛异常被吞掉 —— 服务侧一条日志都没有，
+                                //   表现为「TTS 完成但语音没播」，两端都查不到原因。
+                                try {
+                                    safeStartService(Intent(this, OverlayService::class.java).apply {
+                                        setAction(OverlayService.ACTION_SOULLINK_SPEAK)
+                                        putExtra("dataUrl", speech.dataUrl)
+                                    })
+                                    L2DLog.i(L2DLog.Mod.AI, "语音指令已发出",
+                                        "dataUrl=${speech.dataUrl.length}字符")
+                                } catch (t: Throwable) {
+                                    L2DLog.e(L2DLog.Mod.AI, "语音投递失败",
+                                        "dataUrl=${speech.dataUrl.length}字符 " +
+                                                "err=${t.javaClass.simpleName}: ${t.message}", t)
+                                    toast("语音投递失败（数据过大），表演与字幕已播")
+                                }
                             }
                         }
                     }
@@ -985,8 +999,26 @@ class MainActivity : AppCompatActivity() {
             L2DLog.i(L2DLog.Mod.AI, "调试钩子：悬浮窗未运行，先启动")
             startOverlay()
         }
-        // 延后 8 秒：等服务起来 + 页面加载完 + Soullink 引擎就绪
-        binding.root.postDelayed({ askLlmAndPerform(text) }, 8000)
+        // ★ 轮询等待，不用固定延时。
+        //   踩过的坑：原来写 postDelayed(8000)，但服务启动要建两个窗口 +
+        //   WebView 加载页面 + 加载模型，实测 12~18 秒 → 8 秒后仍 isRunning=false，
+        //   对话被前置检查挡掉（日志只留一句「对话未发起：悬浮窗未运行」）。
+        waitForOverlayThenSay(text, 0)
+    }
+
+    /** 每 2 秒检查一次悬浮窗是否就绪，最多等 40 秒，就绪后再发起对话。 */
+    private fun waitForOverlayThenSay(text: String, tries: Int) {
+        if (OverlayService.isRunning) {
+            L2DLog.i(L2DLog.Mod.AI, "悬浮窗已就绪，发起对话", "等待轮次=$tries")
+            askLlmAndPerform(text)
+            return
+        }
+        if (tries >= 20) {
+            L2DLog.w(L2DLog.Mod.AI, "等待悬浮窗超时，放弃本次调试对话",
+                "tries=$tries 已等=${tries * 2}秒")
+            return
+        }
+        binding.root.postDelayed({ waitForOverlayThenSay(text, tries + 1) }, 2000)
     }
 
     /**
