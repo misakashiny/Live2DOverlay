@@ -148,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         setupLogPanel()
         setupPersona()
         setupLlm()
+        setupSections()
         maybeRequestNotification()
     }
 
@@ -873,6 +874,36 @@ class MainActivity : AppCompatActivity() {
     //
     // 为什么不用 Fragment：这些区块共享同一个 Activity 的 binding 与状态，
     // 拆 Fragment 要引入 ViewModel/通信，收益不抵成本。切 visibility 足够。
+
+    // ==================================================================
+    // v1.7.18：分段控件 —— 用 7 个卡片容器的 visibility 分组
+    //
+    // 为什么不用 TabLayout：它必须放在 ScrollView **外面**，会引入一层外层包裹，
+    // 而上次正是那层包裹踩了命名空间错误、且脚本插入的 </LinearLayout> 关错了层级
+    // （XML 合法、编译通过、无崩溃，但运行时切不过去）。
+    // 这次**不做任何结构改动**：只给已有的 7 个卡片容器加 id，直接切它们的 visibility。
+    // ==================================================================
+
+    private fun setupSections() {
+        val groups = listOf(
+            listOf(binding.segStatus, binding.secStatus, binding.secModel),
+            listOf(binding.segCharacter, binding.secPersona),
+            listOf(binding.segDisplay, binding.secDisplay, binding.secSwitch, binding.secFeedback),
+            listOf(binding.segLog, binding.secLog)
+        )
+        fun apply(active: Int) {
+            groups.forEachIndexed { gi, g ->
+                val on = gi == active
+                g.drop(1).forEach { v ->
+                    v.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+                }
+                g.first().alpha = if (on) 1f else 0.45f
+            }
+        }
+        groups.forEachIndexed { gi, g -> g.first().setOnClickListener { apply(gi) } }
+        apply(0)
+        L2DLog.i(L2DLog.Mod.UI, "分段控件已就绪", "sections=4 cards=7")
+    }
 
     private fun setupLlm() {
         if (!SecureKeyStore.available(this)) {

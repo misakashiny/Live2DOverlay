@@ -27,8 +27,53 @@
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
+        <!-- v1.7.18：分段控件（不用 TabLayout —— 它必须放在 ScrollView 外面，
+             会引入外层包裹与命名空间问题；分段按钮放在内容里，零结构改动） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/seg_status"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="状态"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/seg_character"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="角色"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/seg_display"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="显示"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/seg_log"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="日志"
+                android:textSize="13sp" />
+        </LinearLayout>
+
         <!-- ============ 状态卡片 ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_status" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
@@ -127,7 +172,7 @@
         </LinearLayout>
 
         <!-- ============ 模型卡片 ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_model" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -191,7 +236,7 @@
         </LinearLayout>
 
         <!-- ============ 角色人设（v1.7.2 / AI 角色系统 P1） ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_persona" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -528,7 +573,7 @@
         </LinearLayout>
 
         <!-- ============ 显示参数 ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_display" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -725,7 +770,7 @@
         </LinearLayout>
 
         <!-- ============ 开关 ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_switch" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
@@ -822,7 +867,7 @@
                 android:textSize="14sp"
                 android:textStyle="bold" />
 
-            <LinearLayout style="@style/SectionCard"
+            <LinearLayout android:id="@+id/sec_feedback" style="@style/SectionCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
@@ -939,7 +984,7 @@
         </LinearLayout>
 
         <!-- ============ 运行日志（v1.3.0） ============ -->
-        <LinearLayout style="@style/SectionCard"
+        <LinearLayout android:id="@+id/sec_log" style="@style/SectionCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
