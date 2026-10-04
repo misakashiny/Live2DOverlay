@@ -827,6 +827,25 @@ class MainActivity : AppCompatActivity() {
                     putExtra("json", json)
                 })
                 binding.etSoullinkMsg.text?.clear()
+
+                // v1.7.16：TTS —— 合成语音后投给页面（页面负责播放 + WebAudio 口型）
+                // 放在表演之后：先让动作起来，语音到了再叠加上去，体感更快。
+                if (SecureKeyStore.hasTts(this)) {
+                    TtsClient.synthesize(this, sem.reply) { speech, terr ->
+                        runOnUiThread {
+                            if (speech == null) {
+                                // TTS 失败不该影响已经播出去的表演与字幕
+                                L2DLog.w(L2DLog.Mod.AI, "TTS 未播放", "err=$terr")
+                                toast("语音合成失败（表演与字幕已播）")
+                            } else {
+                                safeStartService(Intent(this, OverlayService::class.java).apply {
+                                    setAction(OverlayService.ACTION_SOULLINK_SPEAK)
+                                    putExtra("dataUrl", speech.dataUrl)
+                                })
+                            }
+                        }
+                    }
+                }
             }
         }
     }

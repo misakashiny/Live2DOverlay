@@ -31,6 +31,49 @@ object SecureKeyStore {
     const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
     const val DEFAULT_MODEL = "gpt-4.1-mini"
 
+    // ---- v1.7.16：TTS（百炼 Qwen-TTS）----
+    // 端点固定、不需要 WorkspaceId（CosyVoice v3 需要，故未选它）
+    const val KEY_TTS_BASE_URL = "tts_base_url"
+    const val KEY_TTS_MODEL = "tts_model"
+    const val KEY_TTS_VOICE = "tts_voice"
+
+    /**
+     * TTS 配置。**复用同一个百炼 API Key**（`KEY_API`）——
+     * 百炼的 LLM（兼容模式）与 TTS 用同一个 Key，不必让用户填两遍。
+     */
+    fun ttsBaseUrl(context: Context): String =
+        store(context)?.getString(KEY_TTS_BASE_URL, null)?.takeIf { it.isNotBlank() }
+            ?: TtsClient.DEFAULT_BASE_URL
+
+    fun ttsModel(context: Context): String =
+        store(context)?.getString(KEY_TTS_MODEL, null)?.takeIf { it.isNotBlank() }
+            ?: TtsClient.DEFAULT_MODEL
+
+    fun ttsVoice(context: Context): String =
+        store(context)?.getString(KEY_TTS_VOICE, null)?.takeIf { it.isNotBlank() }
+            ?: TtsClient.DEFAULT_VOICE
+
+    /** TTS 是否可用（复用 LLM 的 Key） */
+    fun hasTts(context: Context): Boolean = hasKey(context)
+
+    /** 保存 TTS 配置（Key 沿用 `save()` 的那份，不在这里改） */
+    fun saveTts(context: Context, baseUrl: String, model: String, voice: String): Boolean {
+        val p = store(context) ?: return false
+        return try {
+            val e = p.edit()
+            if (baseUrl.isBlank()) e.remove(KEY_TTS_BASE_URL) else e.putString(KEY_TTS_BASE_URL, baseUrl.trim())
+            if (model.isBlank()) e.remove(KEY_TTS_MODEL) else e.putString(KEY_TTS_MODEL, model.trim())
+            if (voice.isBlank()) e.remove(KEY_TTS_VOICE) else e.putString(KEY_TTS_VOICE, voice.trim())
+            val ok = e.commit()
+            L2DLog.i(L2DLog.Mod.AI, "TTS 配置已保存",
+                "ok=$ok baseUrl=$baseUrl model=$model voice=$voice")
+            ok
+        } catch (t: Throwable) {
+            L2DLog.e(L2DLog.Mod.AI, "TTS 配置保存失败", "err=${t.javaClass.simpleName}", t)
+            false
+        }
+    }
+
     @Volatile
     private var prefs: SharedPreferences? = null
 

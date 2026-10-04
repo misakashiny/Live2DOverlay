@@ -145,6 +145,18 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         const val ACTION_SOULLINK_PERFORM = "com.live2d.overlay.action.SOULLINK_PERFORM"
 
+        /**
+         * v1.7.16：播放一段语音（TTS）。
+         *
+         * 传的是 **data: URL**（不是 http 链接）—— 页面侧用 WebAudio `AnalyserNode`
+         * 做 LipSync，而 `createMediaElementSource` 要求音频**同源或带 CORS 头**，
+         * 否则输出静音。所以 Kotlin 侧已把音频下载好并转成 data URL。
+         */
+        const val ACTION_SOULLINK_SPEAK = "com.live2d.overlay.action.SOULLINK_SPEAK"
+
+        /** v1.7.16：停止语音 */
+        const val ACTION_SOULLINK_STOP_SPEAK = "com.live2d.overlay.action.SOULLINK_STOP_SPEAK"
+
         /** v1.4.0：仅更新窗口透明度，不重载页面（Bug-A 修复配套） */
         const val ACTION_SET_ALPHA = "com.live2d.overlay.action.SET_ALPHA"
 
@@ -330,6 +342,26 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                         "window.__mikuLive2DSoullinkPerform && window.__mikuLive2DSoullinkPerform($quoted)")
                     L2DLog.i(L2DLog.Mod.AI, "对话表演已投递", "bytes=${json.length}")
                 }
+                return START_STICKY
+            }
+            ACTION_SOULLINK_SPEAK -> {
+                // data URL 很长（几百 KB），用 JSONObject.quote() 转义后整串塞进 JS 字面量。
+                // Intent extra 上限约 1MB，而 TtsClient 已把 dataUrl 限在 2.4M 字符以内、
+                // 实际音频几百 KB，安全。
+                val dataUrl = intent.getStringExtra("dataUrl")
+                if (dataUrl.isNullOrBlank()) {
+                    L2DLog.w(L2DLog.Mod.AI, "语音入参为空，已忽略")
+                } else {
+                    val quoted = org.json.JSONObject.quote(dataUrl)
+                    evalJsQuiet(
+                        "window.__mikuLive2DSpeak && window.__mikuLive2DSpeak($quoted)")
+                    L2DLog.i(L2DLog.Mod.AI, "语音已投递", "dataUrl=${dataUrl.length}字符")
+                }
+                return START_STICKY
+            }
+            ACTION_SOULLINK_STOP_SPEAK -> {
+                evalJsQuiet("window.__mikuLive2DStopSpeak && window.__mikuLive2DStopSpeak()")
+                L2DLog.i(L2DLog.Mod.AI, "语音停止指令已投递")
                 return START_STICKY
             }
             else -> {
