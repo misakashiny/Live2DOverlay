@@ -369,3 +369,106 @@ profile:  mouthOpen → ParamMouthOpenY   (mode=set, scale=1, min=0, max=1)
 4. 把 `@soullink-emotion/engine` alias 成 `window.SoullinkEmotion` 的 shim 方案（思路可行，未验证；注意模块加载顺序）
 5. `SpeakingMotionInput` 与 `SpeakingMotionPlanRequest` 的 TS 互赋是否需要断言
    （字段名一致，但 `mode` 联合类型不同：前者 `"duration"|"fixed-parallel"`，后者多一个 `"fixed"`）
+
+---
+
+## 八、实施结果（v1.7.12 / v1.7.13 —— 本方案已落地并真机验证）
+
+> 本节是**事后补记**：上面 §一~§七 是调研与方案，本节记录**实际实现与验证结果**。
+
+### 8.1 采用方案 A（LLM 只出语义，engine 本地编译）
+
+```
+用户消息
+  → MainActivity.askLlmAndPerform()                     MainActivity.kt
+      → LlmClient.converse(context, text, history)       LlmClient.kt（单线程 Executor）
+          → POST {baseURL}/chat/completions              DeepSeek 实测 836ms
+          → parse() → 情绪白名单 + cues/hints 白名单过滤   （第二次过滤）
+          → Semantic{emotion,intensity,confidence,durationMs,cues,hints,reply}
+      → JSONObject 拼语义层 → ACTION_SOULLINK_PERFORM     OverlayService.kt
+          → JSONObject.quote() 转义 → evaluateJavascript
+  → 页面 window.__mikuLive2DSoullinkPerform(json)         live2d_decor.html
+      → 白名单第三次过滤
+      → planner.plan({..., capabilities, seed})          复用同一 planner 实例
+      → runtime.startSpeechPerformance(plan, now)
+```
+
+### 8.2 新增文件与接口
+
+| 文件 / 接口 | 规模 | 职责 |
+|---|---:|---|
+| `SecureKeyStore.kt` | 137 行 | EncryptedSharedPreferences 封装（Android Keystore + AES-256-GCM） |
+| `LlmClient.kt` | 277 行 | OpenAI-compatible 客户端 + 提示词 + 解析 + 白名单 |
+| `MainActivity.askLlmAndPerform()` | — | LLM → 显示回复 → 投递表演 |
+| `MainActivity.setupLlm()` / `refreshLlmView()` | — | 设置界面（Key / BaseURL / Model + 保存 / 测试 / 清除） |
+| `OverlayService.ACTION_SOULLINK_PERFORM` | — | 语义层 JSON → 页面 |
+| `window.__mikuLive2DSoullinkPerform(json)` | — | 页面侧入口 |
+
+新增依赖：`androidx.security:security-crypto:1.1.0-alpha06`
+
+### 8.3 真机验证（DeepSeek）
+
+```
+[AI] 调试触发一轮对话（DEBUG） | chars=16
+[AI] LLM 请求开始 | model=deepseek-chat baseUrl=https://api.deepseek.com/v1 key=sk-***500f
+[AI] LLM 返回 | emotion=excited intensity=0.85 cues=agreement/emphasis
+              hints=celebrate/acknowledge durationMs=5400 耗时=836ms
+              回复=哇——上线啦！恭喜恭喜！这下可以稍微松口气了吧？
+[AI] 对话表演已投递 | bytes=193
+[JS:AI] 已播放对话表演 | 第1轮 emotion=excited 时长=5400ms 手势=3 接受=true
+```
+
+| 验证点 | 结果 |
+|---|---|
+| LLM 往返 | ✅ 836ms（另一次自测 824ms） |
+| 白名单过滤 | ✅ 三次过滤后 cues/hints 均在白名单内 |
+| `durationMs` 估算 | ✅ 5400 = 600 + 24字×200（与 `LlmClient.estimateDurationMs` 一致） |
+| 页面侧手势编排 | ✅ `手势=3` |
+| `startSpeechPerformance` | ✅ `接受=true` |
+| 轮次递增 | ✅ `第1轮`（seed 用 `turnOrdinal`） |
+| 崩溃 | ✅ 0 |
+| 凭据泄漏 | ✅ `git grep` 复核仓库内无 key 片段 |
+
+### 8.4 实施中发现的**额外**问题与修正
+
+| 问题 | 处理 |
+|---|---|
+| **`response_format` 不是所有服务商都支持** | 去掉该字段，只靠 `extractJson()` 兜底（智谱 / 中转站 / Ollama 可能 400） |
+| **前置检查只 toast 不记日志** | 「对话没反应」查不到原因 → 改为记 `对话未发起：悬浮窗未运行 / Soullink 未开启` |
+| **XML 里 `android:text` 不能含裸 `<`** | 写了 `http://<你的IP>` → `mergeDebugResources FAILED`，改为 `http://你的IP` |
+| **本机 UI 自动化不可靠** | `uiautomator dump` 截断（12128 B 上限）；`ScrollView` **不响应合成 swipe**（连续 20 步下滚可见控件集合完全不变）→ 引入两个 debug 钩子 |
+
+### 8.5 两个 **debug 专用**钩子（安全边界同 P0-4 的 `ACTION_DEBUG_JS`）
+
+| 钩子 | 触发文件 | 作用 |
+|---|---|---|
+| `importLlmCredsIfDebug()` | `/sdcard/Live2DModels/llm-creds.txt`（3 行） | 导入凭据 + 立刻自测一次 |
+| `debugSayIfRequested()` | `/sdcard/Live2DModels/llm-say.txt`（内容 = 用户说的话） | 触发一轮真实对话（悬浮窗未运行则自动 `startOverlay()`） |
+
+**共同安全边界**
+- `BuildConfig.DEBUG` 守卫 —— **release 构建里不执行**
+- **文件存在本身就是守卫**（读完立即 `delete()`，天然只跑一次）
+- 日志**只记掩码**（`sk-***500f`），原文从未进入任何日志
+- 提交前用 `git grep` 复核仓库内无 key 片段
+
+### 8.6 与原方案的偏差（如实记录）
+
+| 原方案 | 实际 |
+|---|---|
+| §四 说「不需要打包任何包」 | ✅ 一致 —— 只用了已有的 engine IIFE |
+| §四 提到「`currentPosture` 填当前实际姿态」 | ⚠️ **未实现** —— 没有采集当前姿态的接口，暂用默认（手势可能从非中性位置起步） |
+| §四 提到「`audioPeaks` 对齐重音」 | ⚠️ **未实现** —— 需要 TTS + 音频分析，属语音阶段 |
+| §四 提到「`"append"` 模式排队下一句」 | ⚠️ **未使用** —— 当前用默认 `"replace"` |
+| §七 待办 2「回调 `idleActionGain`」 | ✅ v1.7.11 已做（1.9→1.55 / 1.8→1.5） |
+| §七 待办 5「核对 IIFE 入口」 | ✅ v1.7.11 已做（确认走 `public.ts`） |
+
+### 8.7 仍未做
+
+| # | 事项 |
+|---|---|
+| 1 | 回复文字用气泡 / 字幕显示（现在只在设置界面的状态行） |
+| 2 | 语音（TTS）—— 引擎支持 `setLipSyncEnabled` + `setAudioLevelAnalyzer`，**不要**用 `model.speak()`（见 §六） |
+| 3 | `currentPosture` / `audioPeaks` / `"append"` 模式的接入 |
+| 4 | 「显式指令动作」（服务端 `planner-openai` + `startSpeechMotion`）—— 与方案 A 互斥，需自己做路由 |
+| 5 | 发布前评估两个 debug 钩子是否保留（它们是自动化验证的唯一手段，但也是攻击面） |
+
