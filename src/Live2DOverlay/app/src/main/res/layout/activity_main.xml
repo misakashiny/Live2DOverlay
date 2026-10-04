@@ -380,10 +380,79 @@
                 android:id="@+id/et_llm_model"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="模型名，如 deepseek-chat"
+                android:hint="模型名，如 qwen-plus"
                 android:importantForAutofill="no"
                 android:inputType="text"
                 android:textSize="12sp" />
+
+            <!-- ===== v1.7.17：TTS（百炼 Qwen-TTS，复用同一个 Key）===== -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="语音合成（百炼 Qwen-TTS，复用上面的 Key）"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_tts_model"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="TTS 模型，如 qwen3-tts-flash"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_tts_voice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="音色：Serena(苏瑶) / Momo(茉兔) / Bella(萌宝)"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_voice_serena"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="苏瑶"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_voice_momo"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="茉兔"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_voice_bella"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="萌宝"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_tts_speak"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="试听"
+                    android:textSize="12sp" />
+            </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"

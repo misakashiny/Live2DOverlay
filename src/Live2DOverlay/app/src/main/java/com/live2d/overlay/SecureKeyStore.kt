@@ -27,9 +27,17 @@ object SecureKeyStore {
     private const val KEY_BASE_URL = "llm_base_url"
     private const val KEY_MODEL = "llm_model"
 
-    /** OpenAI-compatible 的默认值（与上游 `OpenAICompatibleClient.ts:26-30` 保持一致） */
-    const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
-    const val DEFAULT_MODEL = "gpt-4.1-mini"
+    /**
+     * 默认值：**方案 A —— 一个百炼 Key 同时管 LLM 与 TTS**。
+     *
+     * - LLM 走百炼的 **OpenAI 兼容模式**端点（`/compatible-mode/v1`），模型 `qwen-plus`
+     * - TTS 走百炼的 `dashscope.aliyuncs.com`（见 [TtsClient]）
+     *
+     * 这样用户只需填**一个 Key**，不用维护两套凭据。
+     * 若要用别家（如 DeepSeek），把 BaseURL 改成对应端点即可 —— 界面已可改。
+     */
+    const val DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    const val DEFAULT_MODEL = "qwen-plus"
 
     // ---- v1.7.16：TTS（百炼 Qwen-TTS）----
     // 端点固定、不需要 WorkspaceId（CosyVoice v3 需要，故未选它）

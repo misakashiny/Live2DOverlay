@@ -872,9 +872,55 @@ class MainActivity : AppCompatActivity() {
                 baseUrl.ifEmpty { SecureKeyStore.DEFAULT_BASE_URL },
                 model.ifEmpty { SecureKeyStore.DEFAULT_MODEL }
             )
-            toast(if (ok) "凭据已保存" else "保存失败")
+            // v1.7.17：同一个按钮顺带保存 TTS 配置（方案 A：一个百炼 Key 管两者）
+            val ttsModel = binding.etTtsModel.text?.toString()?.trim().orEmpty()
+            val ttsVoice = binding.etTtsVoice.text?.toString()?.trim().orEmpty()
+            val okTts = SecureKeyStore.saveTts(
+                this,
+                SecureKeyStore.ttsBaseUrl(this),
+                ttsModel.ifEmpty { TtsClient.DEFAULT_MODEL },
+                ttsVoice.ifEmpty { TtsClient.DEFAULT_VOICE }
+            )
+            toast(if (ok && okTts) "凭据与语音配置已保存" else "保存失败")
             binding.etLlmKey.text?.clear()   // 保存后立刻清掉，不留明文
             refreshLlmView()
+        }
+
+        // v1.7.17：音色快捷选择（用户挑的三个）
+        binding.btnVoiceSerena.setOnClickListener { binding.etTtsVoice.setText("Serena") }
+        binding.btnVoiceMomo.setOnClickListener { binding.etTtsVoice.setText("Momo") }
+        binding.btnVoiceBella.setOnClickListener { binding.etTtsVoice.setText("Bella") }
+
+        // v1.7.17：试听 —— 合成一句固定话术并投给页面（验证「TTS → 语音 → 口型」）
+        binding.btnTtsSpeak.setOnClickListener {
+            if (!SecureKeyStore.hasKey(this)) {
+                toast("请先保存 API Key")
+                return@setOnClickListener
+            }
+            // 先落盘当前音色，否则改完不点保存就试听会用旧的
+            val v = binding.etTtsVoice.text?.toString()?.trim().orEmpty()
+            val m = binding.etTtsModel.text?.toString()?.trim().orEmpty()
+            SecureKeyStore.saveTts(
+                this, SecureKeyStore.ttsBaseUrl(this),
+                m.ifEmpty { TtsClient.DEFAULT_MODEL },
+                v.ifEmpty { TtsClient.DEFAULT_VOICE }
+            )
+            binding.tvLlmStatus.text = "语音合成中…（最长 60 秒）"
+            TtsClient.synthesize(this, "你好呀，我是初音未来，很高兴见到你。") { speech, err ->
+                runOnUiThread {
+                    if (speech == null) {
+                        binding.tvLlmStatus.text = "❌ TTS 失败：$err"
+                        toast("语音合成失败，详见运行日志")
+                    } else {
+                        binding.tvLlmStatus.text =
+                            "✅ 语音 ${speech.bytes}B · ${speech.latencyMs}ms · ${speech.mime}"
+                        safeStartService(Intent(this, OverlayService::class.java).apply {
+                            setAction(OverlayService.ACTION_SOULLINK_SPEAK)
+                            putExtra("dataUrl", speech.dataUrl)
+                        })
+                    }
+                }
+            }
         }
 
         binding.btnLlmClear.setOnClickListener {
@@ -1024,6 +1070,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (binding.etLlmModel.text.isNullOrBlank()) {
             binding.etLlmModel.setText(SecureKeyStore.model(this))
+        }
+        // v1.7.17：TTS 字段同样只在为空时回填
+        if (binding.etTtsModel.text.isNullOrBlank()) {
+            binding.etTtsModel.setText(SecureKeyStore.ttsModel(this))
+        }
+        if (binding.etTtsVoice.text.isNullOrBlank()) {
+            binding.etTtsVoice.setText(SecureKeyStore.ttsVoice(this))
         }
     }
 
