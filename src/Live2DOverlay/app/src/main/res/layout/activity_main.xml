@@ -520,6 +520,41 @@
                     android:layout_height="wrap_content" />
             </LinearLayout>
 
+            <!-- v1.7.23：调参（拖动即时生效，自动持久化） -->
+            <TextView style="@style/SectionTitle" android:layout_marginTop="14dp" android:text="调参（拖动即时生效）" />
+            <TextView style="@style/CaptionText" android:text="改完立刻看到效果，并自动记住。要更大幅度就往上拖。parameterGain 是全局乘数，影响最大。" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="全局幅度 parameterGain" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <TextView android:id="@+id/tv_tune_param" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textColor="@color/accent" android:textSize="14sp" android:textStyle="bold" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seek_tune_param" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView style="@style/CaptionText" android:text="0.4~5，默认 1.45" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="身体动作 bodyMotionGain" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <TextView android:id="@+id/tv_tune_body" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textColor="@color/accent" android:textSize="14sp" android:textStyle="bold" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seek_tune_body" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView style="@style/CaptionText" android:text="0~4，默认 1.25" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="离散动作 idleActionGain" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <TextView android:id="@+id/tv_tune_idle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textColor="@color/accent" android:textSize="14sp" android:textStyle="bold" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seek_tune_idle" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView style="@style/CaptionText" android:text="0~2" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="horizontal">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="连续微动 microMotionGain" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <TextView android:id="@+id/tv_tune_micro" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textColor="@color/accent" android:textSize="14sp" android:textStyle="bold" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seek_tune_micro" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView style="@style/CaptionText" android:text="0~2" />
+
+            <Button android:id="@+id/btn_tune_reset" style="?android:attr/buttonBarButtonStyle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="恢复默认" android:textSize="12sp" />
+
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

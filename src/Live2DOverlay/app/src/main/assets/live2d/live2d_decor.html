@@ -1980,6 +1980,52 @@
     return "body";
   }
 
+  // ==================================================================
+  // v1.7.23：调参接口 —— 供 App 的「调参」界面实时改引擎增益。
+  //
+  // 为什么做这个：之前每调一次都要改 profile → 重新构建装机 → 看日志，
+  // 一轮好几分钟。用户要求「加个调试界面，不然每次都要你一点点增加」。
+  //
+  // 可实时生效的（引擎有 setter）：
+  //   parameterGain   clamp(0.4, 5)  默认 1.45  —— 全局幅度乘数（作用在所有 FACS 参数上）
+  //   bodyMotionGain  clamp(0, 4)    默认 1.25  —— 身体手势与微动
+  //   idleActionGain / microMotionGain / spontaneity / gestureFrequency  走 setMotionStyle
+  // 需要重载页面的（无 setter）：parameterMap 的 scale —— 那是 profile 里查表用的。
+  // ==================================================================
+
+  window.__mikuLive2DApplyTune = function(json) {
+    if (!soullinkReady || !soullinkRuntime) {
+      LOG.w(M.AI, "调参：Soullink 未就绪，已忽略");
+      return false;
+    }
+    let t;
+    try { t = (typeof json === "string") ? JSON.parse(json) : (json || {}); }
+    catch (e) { LOG.w(M.AI, "调参入参不是合法 JSON", "err=" + (e && e.message)); return false; }
+    const applied = [];
+    try {
+      if (typeof t.parameterGain === "number") {
+        soullinkRuntime.setParameterGain(t.parameterGain);
+        applied.push("parameterGain=" + t.parameterGain);
+      }
+      if (typeof t.bodyMotionGain === "number") {
+        soullinkRuntime.setBodyMotionGain(t.bodyMotionGain);
+        applied.push("bodyMotionGain=" + t.bodyMotionGain);
+      }
+      const ms = {};
+      for (const k of ["idleActionGain", "microMotionGain", "spontaneity", "gestureFrequency"]) {
+        if (typeof t[k] === "number") { ms[k] = t[k]; applied.push(k + "=" + t[k]); }
+      }
+      if (Object.keys(ms).length && typeof soullinkRuntime.setMotionStyle === "function") {
+        soullinkRuntime.setMotionStyle(ms);
+      }
+      LOG.i(M.AI, "调参已应用", applied.join(" ") || "(无变化)");
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "调参失败", "err=" + (e && e.message));
+      return false;
+    }
+  };
+
   /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
   function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
@@ -2061,6 +2107,11 @@
         soullinkLastSec = performance.now() / 1000;
         // v1.7.5：如果模型已经就绪，立刻补注入参数信息（否则留给每帧的 tick 兜底）
         maybeInjectPrivateParams();
+        // v1.7.23：URL 里带了调参值就应用（重载页面后恢复上次的调参）
+        try {
+          const tq = params.get("tune");
+          if (tq) window.__mikuLive2DApplyTune(decodeURIComponent(tq));
+        } catch (e) { LOG.w(M.AI, "恢复调参失败", "err=" + (e && e.message)); }
         LOG.i(M.AI, "Soullink 引擎已启动",
           "modelId=" + profile.modelId +
           " parameterMap=" + Object.keys(profile.parameterMap || {}).length +

@@ -149,6 +149,7 @@ class MainActivity : AppCompatActivity() {
         setupPersona()
         setupLlm()
         setupSections()
+        setupTune()
         maybeRequestNotification()
     }
 
@@ -903,6 +904,59 @@ class MainActivity : AppCompatActivity() {
         groups.forEachIndexed { gi, g -> g.first().setOnClickListener { apply(gi) } }
         apply(0)
         L2DLog.i(L2DLog.Mod.UI, "分段控件已就绪", "sections=4 cards=7")
+    }
+
+    /** v1.7.23：调参界面 —— 拖动即时生效，并持久化（重载页面后靠 URL 参数恢复） */
+    private fun setupTune() {
+        // 读回已存的调参值（JSON 串）
+        fun loadMap(): MutableMap<String, Float> {
+            val out = mutableMapOf<String, Float>()
+            val raw = config.tuneJson
+            if (raw.isBlank()) return out
+            try {
+                val o = org.json.JSONObject(raw)
+                for (k in o.keys()) out[k] = o.getDouble(k).toFloat()
+            } catch (t: Throwable) { L2DLog.w(L2DLog.Mod.UI, "调参值解析失败，用默认", "err=${t.message}") }
+            return out
+        }
+        val cur = loadMap()
+        fun push() {
+            val o = org.json.JSONObject()
+            for ((k, v) in cur) o.put(k, v.toDouble())
+            val json = o.toString()
+            safeStartService(Intent(this, OverlayService::class.java).apply {
+                setAction(OverlayService.ACTION_SOULLINK_TUNE)
+                putExtra("json", json)
+            })
+        }
+        fun bind(seek: android.widget.SeekBar, tv: android.widget.TextView,
+                 key: String, lo: Float, hi: Float, def: Float) {
+            seek.max = 100
+            val v0 = (cur[key] ?: def).coerceIn(lo, hi)
+            seek.progress = (((v0 - lo) / (hi - lo)) * 100f).toInt().coerceIn(0, 100)
+            fun show() { tv.text = "%.2f".format(lo + (hi - lo) * seek.progress / 100f) }
+            show()
+            seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                    show()
+                    if (!fromUser) return
+                    cur[key] = lo + (hi - lo) * p / 100f
+                    push()
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+            })
+        }
+        bind(binding.seekTuneParam, binding.tvTuneParam, "parameterGain", 0.4f, 5f, 1.45f)
+        bind(binding.seekTuneBody, binding.tvTuneBody, "bodyMotionGain", 0f, 4f, 1.25f)
+        bind(binding.seekTuneIdle, binding.tvTuneIdle, "idleActionGain", 0f, 2f, 1f)
+        bind(binding.seekTuneMicro, binding.tvTuneMicro, "microMotionGain", 0f, 2f, 1f)
+        binding.btnTuneReset.setOnClickListener {
+            cur.clear()
+            push()
+            toast("已恢复默认（重开悬浮窗后完全生效）")
+        }
+        L2DLog.i(L2DLog.Mod.UI, "调参界面已就绪", "已存参数=" + cur.keys.joinToString("/"))
     }
 
     private fun setupLlm() {

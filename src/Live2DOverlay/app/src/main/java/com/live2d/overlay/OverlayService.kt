@@ -154,6 +154,14 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         const val ACTION_SOULLINK_SPEAK = "com.live2d.overlay.action.SOULLINK_SPEAK"
 
+        /**
+         * v1.7.23：调参 —— 实时改引擎增益（bodyMotionGain / parameterGain / motionStyle）。
+         *
+         * 与其它 action 的区别：它**同时**做两件事 —— 存 prefs（重载后恢复）
+         * 与实时投给页面（拖动滑条立刻见效）。
+         */
+        const val ACTION_SOULLINK_TUNE = "com.live2d.overlay.action.SOULLINK_TUNE"
+
         /** v1.7.16：停止语音 */
         const val ACTION_SOULLINK_STOP_SPEAK = "com.live2d.overlay.action.SOULLINK_STOP_SPEAK"
 
@@ -341,6 +349,18 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                     evalJsQuiet(
                         "window.__mikuLive2DSoullinkPerform && window.__mikuLive2DSoullinkPerform($quoted)")
                     L2DLog.i(L2DLog.Mod.AI, "对话表演已投递", "bytes=${json.length}")
+                }
+                return START_STICKY
+            }
+            ACTION_SOULLINK_TUNE -> {
+                val json = intent.getStringExtra("json")
+                if (json.isNullOrBlank()) {
+                    L2DLog.w(L2DLog.Mod.AI, "调参入参为空，已忽略")
+                } else {
+                    config.tuneJson = json   // 存起来，重载页面后靠 URL 参数恢复
+                    val quoted = org.json.JSONObject.quote(json)
+                    evalJsQuiet("window.__mikuLive2DApplyTune && window.__mikuLive2DApplyTune($quoted)")
+                    L2DLog.i(L2DLog.Mod.AI, "调参已投递", json)
                 }
                 return START_STICKY
             }

@@ -47,6 +47,9 @@ class OverlayConfig(context: Context) {
         /** v1.7.18：对话时是否自动朗读（TTS） */
         const val KEY_VOICE_ENABLED = "voice_enabled"
 
+        /** v1.7.23：调参界面的参数（一个 JSON 串，避免为每个旋钮加一个 pref） */
+        const val KEY_TUNE_JSON = "tune_json"
+
         // ---- 默认值（对齐车机横屏 2560x720 场景）----
         const val DEF_CENTER_X = 1448f
         const val DEF_CENTER_Y = 420f
@@ -202,6 +205,16 @@ class OverlayConfig(context: Context) {
         set(v) = prefs.edit().putBoolean(KEY_VOICE_ENABLED, v).apply()
 
     /**
+     * v1.7.23：调参界面的参数，形如 {"parameterGain":2.6,"bodyMotionGain":3.8}。
+     *
+     * 用一个 JSON 串而不是给每个旋钮加一个 pref：旋钮会增减，串更好扩展；
+     * 而且页面侧本来就是按 key 读的，天然对齐。空串 = 用引擎默认值。
+     */
+    var tuneJson: String
+        get() = prefs.getString(KEY_TUNE_JSON, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_TUNE_JSON, v).apply()
+
+    /**
      * 构造 WebView 页面 URL。
      *
      * 参数协议与原版 MikuCarLauncher 完全对齐，便于直接复用同一份 live2d_decor.html。
@@ -239,6 +252,8 @@ class OverlayConfig(context: Context) {
         sb.append("&snap=").append(if (edgeSnap) "1" else "0")
         // v1.7.3（实验）：Soullink 情绪引擎。默认 0 = 用内置实现。
         sb.append("&soullink=").append(if (soullinkEnabled) "1" else "0")
+            // v1.7.23：调参值随 URL 传（重载页面后自动恢复；拖动时走 ACTION_SOULLINK_TUNE 实时生效）
+            .append(if (tuneJson.isBlank()) "" else "&tune=" + java.net.URLEncoder.encode(tuneJson, "UTF-8"))
         return sb.toString()
     }
 
