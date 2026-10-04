@@ -147,6 +147,7 @@ class MainActivity : AppCompatActivity() {
         refreshState()
         setupLogPanel()
         setupPersona()
+        setupLlm()
         maybeRequestNotification()
     }
 
@@ -750,6 +751,87 @@ class MainActivity : AppCompatActivity() {
             putExtra("text", text)
         })
         toast("已投递：$text")
+    }
+
+    // ==================================================================
+    // v1.7.12：LLM 凭据设置
+    //
+    // 安全约定（用户选择方案 A：应用内输入 + EncryptedSharedPreferences）：
+    // · Key 输入框用 textPassword，且 importantForAutofill=no
+    // · **只回填掩码，绝不回填 Key 原文** —— 避免 Key 出现在界面/截屏里
+    // · 「输入框留空 = 不改动已存的 Key」—— 用户只改 baseUrl/model 时不会把 Key 清掉
+    // · 保存后立刻清空输入框，不留明文
+    // ==================================================================
+
+    private fun setupLlm() {
+        if (!SecureKeyStore.available(this)) {
+            binding.tvLlmStatus.text = "⚠️ 加密存储不可用（Keystore 异常），无法保存凭据"
+            binding.btnLlmSave.isEnabled = false
+            binding.btnLlmTest.isEnabled = false
+            return
+        }
+        refreshLlmView()
+
+        binding.btnLlmSave.setOnClickListener {
+            val typed = binding.etLlmKey.text?.toString()?.trim().orEmpty()
+            val baseUrl = binding.etLlmBaseUrl.text?.toString()?.trim().orEmpty()
+            val model = binding.etLlmModel.text?.toString()?.trim().orEmpty()
+            val newKey = if (typed.isEmpty()) null else typed   // 空 = 不改动
+            val ok = SecureKeyStore.save(
+                this,
+                newKey,
+                baseUrl.ifEmpty { SecureKeyStore.DEFAULT_BASE_URL },
+                model.ifEmpty { SecureKeyStore.DEFAULT_MODEL }
+            )
+            toast(if (ok) "凭据已保存" else "保存失败")
+            binding.etLlmKey.text?.clear()   // 保存后立刻清掉，不留明文
+            refreshLlmView()
+        }
+
+        binding.btnLlmClear.setOnClickListener {
+            SecureKeyStore.clear(this)
+            binding.etLlmKey.text?.clear()
+            refreshLlmView()
+            toast("凭据已清除")
+        }
+
+        binding.btnLlmTest.setOnClickListener {
+            if (!SecureKeyStore.hasKey(this)) {
+                toast("请先保存 API Key")
+                return@setOnClickListener
+            }
+            binding.tvLlmStatus.text = "测试中…（最长 45 秒）"
+            LlmClient.converse(this, "你好，请用一句话打个招呼。", emptyList()) { sem, err ->
+                runOnUiThread {
+                    if (sem != null) {
+                        binding.tvLlmStatus.text =
+                            "✅ 连通 · ${sem.latencyMs}ms · emotion=${sem.emotion} · " +
+                                    "durationMs=${sem.durationMs}"
+                        toast("LLM 连通：${sem.reply.take(30)}")
+                    } else {
+                        binding.tvLlmStatus.text = "❌ 失败：$err"
+                        toast("LLM 测试失败，详见运行日志")
+                    }
+                }
+            }
+        }
+    }
+
+    /** 刷新 LLM 状态行（**只显示掩码**，不显示 Key 原文） */
+    private fun refreshLlmView() {
+        val key = SecureKeyStore.apiKey(this)
+        binding.tvLlmStatus.text = if (key.isNullOrBlank()) {
+            "未配置"
+        } else {
+            "已配置 · key=${SecureKeyStore.masked(key)} · ${SecureKeyStore.model(this)}"
+        }
+        // 只在为空时回填默认值，避免覆盖用户已改的
+        if (binding.etLlmBaseUrl.text.isNullOrBlank()) {
+            binding.etLlmBaseUrl.setText(SecureKeyStore.baseUrl(this))
+        }
+        if (binding.etLlmModel.text.isNullOrBlank()) {
+            binding.etLlmModel.setText(SecureKeyStore.model(this))
+        }
     }
 
     /** 刷新「当前角色」那一行 */

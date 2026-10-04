@@ -133,9 +133,14 @@ object LlmClient {
             .put("messages", messages)
             .put("temperature", 0.7)
             .put("max_tokens", 400)
-            // ★ 强制 JSON：上游是三级降级（json_schema → json_object → 无 format），
-            //   这里只用最通用的 json_object，兼容性最好。
-            .put("response_format", JSONObject().put("type", "json_object"))
+            // ★ 刻意**不传** `response_format`。
+            //
+            //   上游 planner-openai 是三级降级（json_schema → json_object → 无 format），
+            //   但那个字段**不是所有 OpenAI-compatible 服务商都支持**：
+            //   OpenAI / DeepSeek / 通义支持；智谱、部分中转站、Ollama 可能直接 400。
+            //
+            //   而解析侧已有 `extractJson()`（手写括号配平，能处理外面包着 ```json
+            //   或解释文字的情况）—— 该字段没有必要，去掉后对所有服务商都安全。
             .toString()
     }
 

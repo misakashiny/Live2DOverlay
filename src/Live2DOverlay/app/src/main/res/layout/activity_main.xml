@@ -347,6 +347,94 @@
                     android:text="我累了"
                     android:textSize="12sp" />
             </LinearLayout>
+
+            <!-- ============ v1.7.12 LLM 凭据（加密存储） ============ -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="LLM 对话（OpenAI-compatible）"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/et_llm_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="API Key（留空=不改动已存的）"
+                android:importantForAutofill="no"
+                android:inputType="textPassword"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/et_llm_base_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="BaseURL，如 https://api.deepseek.com/v1"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_llm_model"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="模型名，如 deepseek-chat"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_llm_save"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="保存凭据"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_llm_test"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="测试连接"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_llm_clear"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="清除凭据"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_llm_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="未配置"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="凭据用 EncryptedSharedPreferences 加密（Android Keystore，AES-256-GCM），密钥不出 TEE。常用服务商：DeepSeek https://api.deepseek.com/v1 · 通义 https://dashscope.aliyuncs.com/compatible-mode/v1 · 智谱 https://open.bigmodel.cn/api/paas/v4 · Ollama http://你的IP:11434/v1（key 随便填非空值即可）"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <!-- ============ 显示参数 ============ -->
