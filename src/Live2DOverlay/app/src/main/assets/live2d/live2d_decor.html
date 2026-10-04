@@ -1647,6 +1647,146 @@
     return true;
   };
 
+  // ==================================================================
+  // v1.7.15：语音（TTS）播放 + LipSync 接管
+  //
+  // 设计决定：**用 WebAudio AnalyserNode 在页面内做 AudioLevelAnalyzer**。
+  //
+  //   引擎的接口是 `AudioLevelAnalyzer { getLevel(): number; ... }`
+  //   （public.ts:99 在公开面内），配合：
+  //     runtime.setLipSyncEnabled(true)
+  //     runtime.setAudioLevelAnalyzer(analyzer)
+  //     runtime.setVoicePlaybackActive(true/false)
+  //
+  //   为什么不让 Android 侧算 RMS 再推过来：那样每帧都要 evaluateJavascript，
+  //   20Hz 的跨进程调用既费又难看。页面内播放 + 页面内分析，一次调用搞定。
+  //
+  // ⚠️ 音频必须是**同源**（data: / blob:）或带 CORS 头，否则
+  //   createMediaElementSource 会输出静音（WebAudio 的安全限制）。
+  //   所以 Kotlin 侧应当把音频下载后转成 data: URL 再传进来。
+  // ==================================================================
+
+  let speakAudioEl = null;
+  let speakAudioCtx = null;
+  let speakAnalyzer = null;
+
+  /** 基于 WebAudio AnalyserNode 的 AudioLevelAnalyzer 实现 */
+  function createWebAudioAnalyzer(audioEl) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) throw new Error("WebAudio 不可用");
+    const ctx = new Ctx();
+    const src = ctx.createMediaElementSource(audioEl);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    src.connect(analyser);
+    analyser.connect(ctx.destination);
+    const buf = new Uint8Array(analyser.fftSize);
+
+    return {
+      getLevel: function() {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        // RMS 通常在 0.05~0.3，放大到能明显驱动口型；上限 1
+        return Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
+      },
+      getPeak: function() {
+        analyser.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = Math.abs((buf[i] - 128) / 128);
+          if (v > peak) peak = v;
+        }
+        return peak;
+      },
+      isAvailable: function() {
+        return !!audioEl && !audioEl.paused && !audioEl.ended && audioEl.readyState >= 2;
+      },
+      // WebAudio 自身无平滑状态需要清，reset 是空实现（接口要求可选）
+      reset: function() {}
+    };
+  }
+
+  function ensureSpeakAudio() {
+    if (speakAudioEl) return speakAudioEl;
+    const el = new Audio();
+    el.crossOrigin = "anonymous";
+    el.preload = "auto";
+    speakAudioEl = el;
+    speakAudioCtx = null;
+    speakAnalyzer = createWebAudioAnalyzer(el);
+    soullinkRuntime.setLipSyncEnabled(true);
+    soullinkRuntime.setAudioLevelAnalyzer(speakAnalyzer);
+    LOG.i(M.AI, "LipSync 已接管",
+      "WebAudio AnalyserNode fft=512 + setLipSyncEnabled(true) + setAudioLevelAnalyzer");
+    return el;
+  }
+
+  /**
+   * Android → 页面：播放一段语音并驱动口型。
+   * @param {string} url 音频地址；**建议 data: URL**（同源，避免 WebAudio 静音）
+   * @param {number} [fallbackMs] 无法读取时长时的兜底
+   */
+  window.__mikuLive2DSpeak = function(url, fallbackMs) {
+    if (!soullinkReady || !soullinkRuntime) {
+      LOG.w(M.AI, "Soullink 未就绪，语音已丢弃", "ready=" + soullinkReady);
+      return false;
+    }
+    const u = String(url || "");
+    if (!u) { LOG.w(M.AI, "语音地址为空"); return false; }
+    try {
+      const el = ensureSpeakAudio();
+      // AudioContext 需要用户手势后才能 resume（Android WebView 里通常已解锁）
+      try {
+        const ctx = speakAudioCtx || (el.__ctx || null);
+        if (ctx && ctx.state === "suspended") ctx.resume();
+      } catch (e) { /* 忽略 */ }
+
+      el.onended = function() {
+        try {
+          soullinkRuntime.setVoicePlaybackActive(false);
+          LOG.i(M.AI, "语音播放结束");
+        } catch (e) { /* 忽略 */ }
+      };
+      el.onerror = function() {
+        LOG.w(M.AI, "语音播放出错", "src=" + u.slice(0, 48));
+        try { soullinkRuntime.setVoicePlaybackActive(false); } catch (e) { /* 忽略 */ }
+      };
+
+      el.src = u;
+      const p = el.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(function(e) {
+          LOG.w(M.AI, "语音 play() 被拒", "err=" + (e && e.message));
+        });
+      }
+      soullinkRuntime.setVoicePlaybackActive(true);
+      LOG.i(M.AI, "语音开始播放",
+        "srcLen=" + u.length + " 兜底时长=" + (Number(fallbackMs) || 0) + "ms");
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "语音播放失败", "err=" + (e && e.message));
+      return false;
+    }
+  };
+
+  /** Android → 页面：停止语音 */
+  window.__mikuLive2DStopSpeak = function() {
+    try {
+      if (speakAudioEl) { speakAudioEl.pause(); speakAudioEl.currentTime = 0; }
+      if (soullinkReady && soullinkRuntime) soullinkRuntime.setVoicePlaybackActive(false);
+      LOG.i(M.AI, "语音已停止");
+      return true;
+    } catch (e) {
+      LOG.w(M.AI, "停止语音失败", "err=" + (e && e.message));
+      return false;
+    }
+  };
+
   /**
    * Android → 页面：播放一次对话表演。
    * @param {string|object} json 语义层，形如
