@@ -1345,6 +1345,51 @@
   let soullinkParamInfoInjected = false;
   let soullinkParamInfoTries = 0;
   let soullinkParamInfoGivenUp = false;
+  let soullinkEyeTakenOver = false;
+  let soullinkEyeTries = 0;
+
+  /**
+   * ★ v1.7.10：接管眼部控制，消除「双眨眼源」冲突。
+   *
+   * 冲突链：`model3.json` 的 `Groups.EyeBlink` 让 pixi-live2d-display 每帧自动眨眼
+   * （写 `ParamEyeLOpen`/`ParamEyeROpen`），而 Soullink 的 `parameterMap.eyeOpen`
+   * 也写同一对参数。`beforeModelUpdate`（Soullink）在 `internalModel.update()`
+   * （pixi 眨眼）**之前**触发 → pixi 的眨眼**覆盖** Soullink 的眼部输出，
+   * 吃掉它的表情性眼部控制（眯眼笑 / 睁大眼）。
+   *
+   * 实测（临时移除 EyeBlink 组）：眨眼仍由 Soullink 的 `au45Blink` 正常驱动，
+   * 动 8~15%（比之前 7% 更活跃）→ pixi 的眨眼器是冗余的。
+   *
+   * **按需关闭**而不是改用户的 `model3.json` —— 这样 Soullink 关闭时（默认态）
+   * pixi 的眨眼照旧工作。
+   *
+   * ⚠️ 必须延后到模型就绪：`__mikuLive2DStartSoullink` 由 `onPageFinished` 触发，
+   * 那时 `model` 往往还是 null（第一版就踩了这个坑，日志一条没打）。
+   */
+  function maybeTakeOverEyeControl() {
+    if (soullinkEyeTakenOver) return;
+    const im = model && model.internalModel;
+    if (!im) {
+      if (++soullinkEyeTries > 900) {
+        LOG.w(M.AI, "放弃接管眼部控制（模型未就绪）", "tries=" + soullinkEyeTries);
+        soullinkEyeTakenOver = true;
+      }
+      return;
+    }
+    try {
+      if (im.eyeBlink) {
+        im.eyeBlink = null;
+        LOG.i(M.AI, "已接管眼部控制",
+          "关闭 pixi 自动眨眼，避免覆盖 Soullink 的 eyeOpen 输出");
+      } else {
+        LOG.w(M.AI, "pixi 眨眼器不存在或已关闭（无需接管）",
+          "eyeBlink=" + (im.eyeBlink === null ? "null" : typeof im.eyeBlink));
+      }
+    } catch (e) {
+      LOG.w(M.AI, "关闭 pixi 眨眼失败", "err=" + (e && e.message));
+    }
+    soullinkEyeTakenOver = true;
+  }
 
   /**
    * 幂等：等「引擎就绪」且「模型就绪」后注入一次参数信息。
@@ -1611,6 +1656,8 @@
     if (!soullinkReady || !soullinkRuntime) return;
     // v1.7.5：模型就绪后补注入参数信息（见 maybeInjectPrivateParams 的注释）
     maybeInjectPrivateParams();
+    // v1.7.10：模型就绪后接管眼部控制（见 maybeTakeOverEyeControl 的注释）
+    maybeTakeOverEyeControl();
     const nowSec = performance.now() / 1000;
     // v1.7.7：定时自发表演（每 12~30 秒一次），解决「动画不够多」
     soullinkAutoPulse(nowSec);
