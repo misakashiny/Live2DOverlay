@@ -28,7 +28,8 @@
       "v1.7.7c：leanForward 改为只在 A[0.62,0.90] 出现（待机不该一直前倾）；spin A[0.20,0.36] / qqMode A[0.34,0.60]",
       "v1.7.7d：姿态 intensity 0.95→0.75（部分呈现，避免全开锁死）",
       "v1.7.8b：移除 privateEmotionMap.leanForward —— 它是唯一反复锁死 100% 的姿态（VAD 被表演推高后窗口长期满足），且「一直前倾」不像待机。exp3 文件仍在，只是不参与自动轮换。",
-      "v1.7.9：补上 characterPersonality(expressiveness 0.85→1.0) 与 performanceCapabilities(gestureAmplitudeGain 1→2.6, tier=high, 轴预算 4→6, 密度 0.84→0.95) —— 这两个入口之前完全没接，是「姿势浮动小」的主因"
+      "v1.7.9：补上 characterPersonality(expressiveness 0.85→1.0) 与 performanceCapabilities(gestureAmplitudeGain 1→2.6, tier=high, 轴预算 4→6, 密度 0.84→0.95) —— 这两个入口之前完全没接，是「姿势浮动小」的主因",
+      "v1.7.11：按官方警告回调 idleActionGain 1.9→1.55、microMotionGain 1.8→1.5（不砍到默认 1，避免幅度倒退）"
     ]
   },
   "schemaVersion": 2,
@@ -486,8 +487,8 @@
   },
   "motionStyle": {
     "preset": "lively",
-    "idleActionGain": 1.9,
-    "microMotionGain": 1.8,
+    "idleActionGain": 1.55,
+    "microMotionGain": 1.5,
     "spontaneity": 2,
     "gestureFrequency": 2,
     "blinkRate": 1.2,
