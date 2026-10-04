@@ -1486,8 +1486,12 @@
     slAutoPulseAt = nowSec + 20 + Math.random() * 25;
     const pool = SL_IDLE_EMOTIONS;
     const emo = pool[Math.floor(Math.random() * pool.length)];
-    playSoullinkPerformance(emo, 0.45 + Math.random() * 0.2,
-      2600 + Math.random() * 2200, "auto_idle");
+    // v1.7.23：强度 0.45~0.65 → 0.60~0.85。
+    //   姿态的 V 门槛抬到 0.55 后（姿态语义=反应，不是待机状态），
+    //   自发表演必须能把 V 推过 0.55，否则待机期间一个姿态都不出现、
+    //   幅度从 Δ47 掉到 Δ7（实测）。提高强度让姿态每 20~45 秒短暂出现一次。
+    playSoullinkPerformance(emo, 0.60 + Math.random() * 0.25,
+      3000 + Math.random() * 2500, "auto_idle");
   }
 
   // ==================================================================
@@ -1552,6 +1556,19 @@
         capabilities: caps
       });
       const ok = soullinkRuntime.startSpeechPerformance(plan, now);
+      // ★ v1.7.24：同时给 VAD 一个**瞬态**推力。
+      //
+      //   矛盾所在：姿态（privateEmotionMap）是 VAD 驱动的。
+      //     · triggerIntent   推 VAD 但**保持** → 姿态锁死（v1.7.8 的老问题）
+      //     · startSpeechPerformance 完全不推 VAD → 姿态永不出现（实测自发表演 5 次、姿态仍 0%）
+      //   正解是第三条路：applyVADDelta —— 推一下，随后自然衰减回基线，
+      //   姿态**短暂出现后消退**，既明显又不常开。
+      try {
+        if (typeof soullinkRuntime.applyVADDelta === "function") {
+          const push = 0.34 * Math.max(0, Math.min(1, Number(intensity) || 0.6));
+          soullinkRuntime.applyVADDelta({ valence: push, arousal: push * 0.6 }, 1);
+        }
+      } catch (e) { /* 推力失败不该影响表演 */ }
       LOG.i(M.AI, "已播放表演",
         "emotion=" + emotion + " 时长=" + Math.round(plan.durationMs) + "ms" +
         " 手势=" + (plan.gestures ? plan.gestures.length : 0) +

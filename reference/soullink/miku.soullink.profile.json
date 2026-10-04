@@ -30,7 +30,10 @@
       "v1.7.8b：移除 privateEmotionMap.leanForward —— 它是唯一反复锁死 100% 的姿态（VAD 被表演推高后窗口长期满足），且「一直前倾」不像待机。exp3 文件仍在，只是不参与自动轮换。",
       "v1.7.9：补上 characterPersonality(expressiveness 0.85→1.0) 与 performanceCapabilities(gestureAmplitudeGain 1→2.6, tier=high, 轴预算 4→6, 密度 0.84→0.95) —— 这两个入口之前完全没接，是「姿势浮动小」的主因",
       "v1.7.11：按官方警告回调 idleActionGain 1.9→1.55、microMotionGain 1.8→1.5（不砍到默认 1，避免幅度倒退）",
-      "v1.7.20：scale head 60→85 / body 28→42 / gaze 2.5→4；idleActionGain 1.55→1.9、microMotionGain 1.5→1.9；★ 姿态 valence 下限 0.42→0.30（这是姿态几乎不出现的主因）；intensity→0.95"
+      "v1.7.20：scale head 60→85 / body 28→42 / gaze 2.5→4；idleActionGain 1.55→1.9、microMotionGain 1.5→1.9；★ 姿态 valence 下限 0.42→0.30（这是姿态几乎不出现的主因）；intensity→0.95",
+      "v1.7.21：qqMode V0.30→0.52 A0.34→0.44（用户反馈太频繁）；spin A 下限 0.20→0.26",
+      "v1.7.22：改用「同组 A 窗口不重叠切分」而不是抬高单个门槛 —— miku_pose: spin A[0.20,0.32] / qqMode A[0.31,0.44]；miku_prop: scallion A[0.20,0.30] / sing A[0.29,0.40] / heart A[0.39,0.52]",
+      "v1.7.23：所有姿态 V 下限 0.30→0.55 —— 姿态语义上是「反应」而非「待机状态」；待机 V≈0.40 时不出现，只有点击/对话/表演推高 V 时才出现"
     ]
   },
   "schemaVersion": 2,
@@ -341,10 +344,10 @@
       "vadRange": {
         "valence": [
           0.3,
-          0.9
+          0.95
         ],
         "arousal": [
-          0.1,
+          0.15,
           1
         ],
         "dominance": [
@@ -371,12 +374,12 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.55,
           1
         ],
         "arousal": [
-          0.34,
-          0.6
+          0.38,
+          0.75
         ]
       },
       "activeValue": 1,
@@ -395,12 +398,12 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.55,
           1
         ],
         "arousal": [
           0.2,
-          0.36
+          0.45
         ]
       },
       "activeValue": 1,
@@ -419,12 +422,12 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.55,
           1
         ],
         "arousal": [
-          0.24,
-          0.34
+          0.2,
+          0.45
         ]
       },
       "activeValue": 1,
@@ -444,12 +447,12 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.55,
           1
         ],
         "arousal": [
-          0.38,
-          0.48
+          0.3,
+          0.6
         ]
       },
       "activeValue": 1,
@@ -469,12 +472,12 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.55,
           1
         ],
         "arousal": [
-          0.28,
-          0.4
+          0.4,
+          0.8
         ]
       },
       "activeValue": 1,
