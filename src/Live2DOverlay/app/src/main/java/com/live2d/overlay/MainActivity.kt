@@ -770,6 +770,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnLlmTest.isEnabled = false
             return
         }
+        importLlmCredsIfDebug()
         refreshLlmView()
 
         binding.btnLlmSave.setOnClickListener {
@@ -817,8 +818,75 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 刷新 LLM 状态行（**只显示掩码**，不显示 Key 原文） */
-    private fun refreshLlmView() {
+    /**
+     * v1.7.12 · **仅 debug 构建**：从 sdcard 文件导入 LLM 凭据。
+     *
+     * 为什么需要：本机 MIUI 的 UI 自动化不可靠（uiautomator dump 截断 + ScrollView
+     * 不响应合成 swipe，实测 20 步滚动可见控件集合完全不变），无法自动把 Key
+     * 填进 `et_llm_key`；而「测试连接」这条链路必须能自动化验证。
+     *
+     * 安全边界（与 P0-4 的 `ACTION_DEBUG_JS` 收口做法一致）：
+     * - `BuildConfig.DEBUG` 守卫 —— **release 构建里这段代码不会执行**
+     * - 只在**尚未配置**时导入，不会覆盖用户手填的
+     * - 导入后**立即删除**明文文件（push 由调用方做，清理由本函数做）
+     * - 日志只记掩码，不记原文
+     *
+     * 文件格式（3 行；`#` 开头为注释行）：
+     * ```
+     * <apiKey>
+     * <baseUrl>
+     * <model>
+     * ```
+     */
+    private fun importLlmCredsIfDebug() {
+        if (!BuildConfig.DEBUG) return
+        // 不检查 hasKey —— **文件存在本身就是守卫**（导入后立即删除，天然只跑一次）。
+        // 保留 hasKey 检查会导致「想重新导入时必须先清凭据」，反而更难用。
+        val f = java.io.File("/sdcard/Live2DModels/llm-creds.txt")
+        if (!f.isFile) return
+        try {
+            val lines = f.readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+            if (lines.size < 3) {
+                L2DLog.w(L2DLog.Mod.AI, "凭据文件格式不对（需 3 行）", "lines=${lines.size}")
+            } else {
+                val ok = SecureKeyStore.save(this, lines[0], lines[1], lines[2])
+                L2DLog.w(L2DLog.Mod.AI, "已从文件导入 LLM 凭据（DEBUG）",
+                    "ok=$ok key=${SecureKeyStore.masked(lines[0])} " +
+                            "base=${lines[1]} model=${lines[2]}")
+                // DEBUG：导入后立刻自测一次，验证「凭据 → HTTP → 解析」全链路。
+                // 之所以放在这里而不是靠点按钮：本机 UI 自动化点不到「测试连接」。
+                if (ok) {
+                    L2DLog.i(L2DLog.Mod.AI, "LLM 自测开始（DEBUG）", "由导入路径触发")
+                    LlmClient.converse(this, "你好，请用一句话打个招呼。", emptyList()) { sem, err ->
+                        runOnUiThread {
+                            if (sem != null) {
+                                L2DLog.i(L2DLog.Mod.AI, "LLM 自测通过",
+                                    "耗时=${sem.latencyMs}ms emotion=${sem.emotion} " +
+                                            "intensity=${"%.2f".format(sem.intensity)} " +
+                                            "durationMs=${sem.durationMs} " +
+                                            "cues=${sem.semanticCues.joinToString("/")} " +
+                                            "hints=${sem.deliveryHints.joinToString("/")} " +
+                                            "reply=${sem.reply.take(60)}")
+                            } else {
+                                L2DLog.e(L2DLog.Mod.AI, "LLM 自测失败", "err=$err")
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            L2DLog.e(L2DLog.Mod.AI, "导入凭据失败", "err=${t.javaClass.simpleName}", t)
+        } finally {
+            // ★ 无论如何都删掉明文文件
+            val deleted = f.delete()
+            L2DLog.i(L2DLog.Mod.AI, "明文凭据文件已清理",
+                "deleted=$deleted path=${f.absolutePath}")
+        }
+    }
+
+    /** 刷新 LLM 状态行（**只显示掩码**，不显示 Key 原文） */    private fun refreshLlmView() {
         val key = SecureKeyStore.apiKey(this)
         binding.tvLlmStatus.text = if (key.isNullOrBlank()) {
             "未配置"
