@@ -1933,6 +1933,53 @@
     }
   }
 
+  // ==================================================================
+  // v1.7.21：部位命中区（几何近似）—— 「摸头/摸手」
+  //
+  // 探针结论（真机实测）：coreModel 有 440 个 ArtMesh / 77 个 Part，
+  //   ✅ getDrawableVertexPositions 能拿顶点
+  //   ❌ 但没有 getDrawableParentPartIndex —— 拿不到「ArtMesh 属于哪个 Part」
+  //   ❌ 且 ArtMesh 名是 ArtMesh2/3/...（无语义）
+  // → 做不了「按 ArtMesh 精确算 Part 包围盒」，只能用几何近似。
+  //
+  // 比例放在 profile.hitRegions 里可调，便于按模型体型微调（不用重编译）。
+  // ==================================================================
+
+  const DEFAULT_HIT_REGIONS = {
+    headY: 0.30,                                   // 头顶到多少算「头」
+    faceY: 0.10, faceX0: 0.32, faceX1: 0.68,       // 头部里「脸」的范围
+    handY0: 0.28, handY1: 0.70, handX: 0.22        // 两侧多少算「手」
+  };
+
+  /** 部位 → 反应（复用已跑通的 playSoullinkPerformance + applyVADDelta） */
+  const PART_REACTIONS = {
+    head:      { emotion: "shy",          intensity: 0.85, ms: 2200 },
+    face:      { emotion: "shy",          intensity: 0.92, ms: 2000 },
+    leftHand:  { emotion: "happy",        intensity: 0.85, ms: 2400 },
+    rightHand: { emotion: "affectionate", intensity: 0.85, ms: 2400 },
+    body:      { emotion: "excited",      intensity: 0.80, ms: 2600 }
+  };
+
+  /** 把屏幕坐标归一到模型包围盒，判定摸到哪个部位 */
+  function detectBodyPartAt(px, py) {
+    const b = (typeof computeModelBounds === "function") ? computeModelBounds() : null;
+    if (!b || b.r <= b.l || b.b <= b.t) return "body";
+    const R = Object.assign({}, DEFAULT_HIT_REGIONS,
+      (soullinkProfile && soullinkProfile.hitRegions) || {});
+    const nx = (px - b.l) / (b.r - b.l);
+    const ny = (py - b.t) / (b.b - b.t);
+    if (nx < -0.05 || nx > 1.05 || ny < -0.05 || ny > 1.05) return "body";
+    if (ny <= R.headY) {
+      if (ny >= R.faceY && nx >= R.faceX0 && nx <= R.faceX1) return "face";
+      return "head";
+    }
+    if (ny >= R.handY0 && ny <= R.handY1) {
+      if (nx <= R.handX) return "leftHand";
+      if (nx >= 1 - R.handX) return "rightHand";
+    }
+    return "body";
+  }
+
   /** 按需加载引擎脚本（只有启用时才加载，避免白白多 133 KB 的解析开销） */
   function loadSoullinkEngine() {
     return new Promise(function(resolve, reject) {
@@ -2297,14 +2344,17 @@
         // 限流 260ms：连点不该把表演队列堆爆，但也不能毫无反应
         if (now - slLastTapAt < 0.26) return true;
         slLastTapAt = now;
-        const pool = SL_TAP_EMOTIONS;
-        const emo = pool[Math.floor(Math.random() * pool.length)];
+        // v1.7.21：按「摸到哪个部位」决定反应（摸头/摸手/摸脸/摸身体）。
+        // 坐标用 pointerLastX/Y —— 按下时就已记下，抬手事件里没有坐标（见上方注释）。
+        const part = detectBodyPartAt(pointerLastX, pointerLastY);
+        const rx = PART_REACTIONS[part] || PART_REACTIONS.body;
+        LOG.i(M.AI, "点击命中部位", "part=" + part + " → " + rx.emotion);
         // ★ v1.7.8：走「有时长的表演」而不是 triggerIntent。
         //   用户反馈「点击是切换到自带的姿势」—— 因为 triggerIntent 把 VAD 推高并保持，
         //   privateEmotionMap 的离散参数就跳到某个值停住。
         //   表演有 durationMs，播完自动结束，视觉上才是「做了一次动作」。
-        playSoullinkPerformance(emo, 0.75 + Math.random() * 0.2,
-          1600 + Math.random() * 1000, "tap");
+        playSoullinkPerformance(rx.emotion, rx.intensity + Math.random() * 0.1,
+          rx.ms + Math.random() * 400, "tap:" + part);
         // 点击顺带把下一次自发表演推后，避免刚点完又自动来一次
         slAutoPulseAt = now + 10 + Math.random() * 12;
         return true;
