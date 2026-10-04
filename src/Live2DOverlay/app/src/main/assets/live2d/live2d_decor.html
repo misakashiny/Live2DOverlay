@@ -1923,6 +1923,22 @@
           LOG.i(M.AI, "探针 父部件索引 前14", m.join(","));
         }
       }
+      // v1.7.24：读 head/body 参数的**真实** min/max —— 判断「幅度是否已到模型上限」
+      if (typeof core.getParameterIndex === "function" && typeof core.getParameterMaximumValue === "function") {
+        const want = ["ParamAngleX","ParamAngleY","ParamAngleZ",
+                      "ParamBodyAngleX","ParamBodyAngleY","ParamBodyAngleZ",
+                      "ParamEyeLOpen","ParamMouthOpenY","ParamBreath"];
+        const rng = [];
+        for (const id of want) {
+          try {
+            const idx = core.getParameterIndex(id);
+            if (idx === undefined || idx === null || idx < 0) { rng.push(id + "=缺失"); continue; }
+            rng.push(id.replace("Param","") + "[" +
+              core.getParameterMinimumValue(idx) + "," + core.getParameterMaximumValue(idx) + "]");
+          } catch (e) { rng.push(id + "=ERR"); }
+        }
+        LOG.i(M.AI, "探针 参数范围", rng.join(" "));
+      }
       if (pc > 0 && typeof core.getPartId === "function") {
         const ps = [];
         for (let i = 0; i < Math.min(pc, 14); i++) { try { ps.push(core.getPartId(i)); } catch (e) { ps.push("ERR"); } }
