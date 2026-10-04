@@ -1491,17 +1491,29 @@
     if (!planner) return false;
     try {
       const now = performance.now() / 1000;
+      // ★ v1.7.9：必须传 capabilities —— 不传时 gestureAmplitudeGain 用默认 1，
+      //   而它最大能到 2.6。这是「姿势浮动小」最主要的杠杆。
+      //   通道用 deriveSpeechPerformanceCapabilities 从档案推导（只启用模型真有的通道）。
+      const lib2 = window.SoullinkEmotion;
+      let caps = (soullinkProfile && soullinkProfile.performanceCapabilities) || {};
+      if (lib2 && typeof lib2.deriveSpeechPerformanceCapabilities === "function") {
+        caps = lib2.deriveSpeechPerformanceCapabilities(soullinkProfile || {}, caps);
+      }
       const plan = planner.plan({
         emotion: emotion,
         intensity: intensity,
         durationMs: durationMs,
-        seed: Math.floor(Math.random() * 0x7fffffff)
+        seed: Math.floor(Math.random() * 0x7fffffff),
+        capabilities: caps
       });
       const ok = soullinkRuntime.startSpeechPerformance(plan, now);
       LOG.i(M.AI, "已播放表演",
         "emotion=" + emotion + " 时长=" + Math.round(plan.durationMs) + "ms" +
         " 手势=" + (plan.gestures ? plan.gestures.length : 0) +
-        " 强度=" + intensity.toFixed(2) + " 来源=" + tag + " 接受=" + ok);
+        " 强度=" + intensity.toFixed(2) + " 来源=" + tag + " 接受=" + ok +
+        " 幅度增益=" + (caps.gestureAmplitudeGain !== undefined ? caps.gestureAmplitudeGain : "默认1") +
+        " 轴预算=" + (plan.motionBudget ? plan.motionBudget.maxSimultaneousAxes : "?") +
+        " 密度=" + (plan.motionBudget ? plan.motionBudget.maxMotionDensity : "?"));
       return ok;
     } catch (e) {
       LOG.w(M.AI, "播放表演失败", "emotion=" + emotion + " err=" + (e && e.message));
@@ -1553,6 +1565,12 @@
         soullinkRuntime = new lib.SoullinkRuntime({
           profile: profile,
           motionStyle: merged,
+          // v1.7.9：★ 补上 CharacterPersonality —— 之前**完全没传**，
+          // 所以表情生成一直用默认 expressiveness=0.85。
+          // 它直接乘在表情幅度上，是「姿势/表情浮动小」的原因之一。
+          personality: (profile && profile.characterPersonality)
+            ? profile.characterPersonality
+            : { expressiveness: 1.0, softness: 0.4, shyness: 0.4, gazeStability: 0.5 },
           // v1.7.5：情绪「底色」也可由 profile 覆盖。
           // 引擎默认 baseline=(0,0,0) 且 ambientDriftStrength=0.034 —— VAD 会死贴 0，
           // 于是 privateEmotionMap 的高情绪门槛永远达不到，表情层全程不动。
