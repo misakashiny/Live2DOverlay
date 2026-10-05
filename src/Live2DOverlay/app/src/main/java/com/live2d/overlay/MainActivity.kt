@@ -33,8 +33,18 @@ import java.io.File
  */
 class MainActivity : AppCompatActivity() {
 
-    private companion object {
+    // v1.7.28：去掉 private —— OverlayService 要访问 proactiveHandler
+    companion object {
         const val TAG = "MainActivity"
+
+        /**
+         * v1.7.28：服务收到「主动搭话」请求后回调到这里。
+         *
+         * 为什么用静态回调：LLM 客户端在 Activity 里，而请求从 Service 来；
+         * 单 Activity 应用里这是最省事的通路（onDestroy 会清掉，避免泄漏）。
+         */
+        @Volatile
+        var proactiveHandler: (() -> Unit)? = null
 
         /**
          * 日志级别存档用的哨兵值：对应下拉第 0 项「全部」。
@@ -149,6 +159,13 @@ class MainActivity : AppCompatActivity() {
         setupPersona()
         setupLlm()
         setupSections()
+        loadLlmHistory()
+        proactiveHandler = {
+            runOnUiThread {
+                L2DLog.i(L2DLog.Mod.AI, "触发主动搭话")
+                askLlmAndPerform("（用户没有说话，请你主动开口说一句，像在自言自语或找他搭话）")
+            }
+        }
         setupTune()
         maybeRequestNotification()
     }
@@ -161,6 +178,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        proactiveHandler = null
+    }
+
+    fun unusedOnDestroy() {
         // 反注册日志监听与自动刷新，避免界面销毁后回调仍持有 Activity
         logListener?.invoke()
         logListener = null
@@ -777,6 +798,31 @@ class MainActivity : AppCompatActivity() {
     /** v1.7.13：对话历史（内存态，只留最近 6 轮 = 12 条；进程结束即丢） */
     private val llmHistory = mutableListOf<Pair<String, String>>()
 
+    /** v1.7.28：把对话历史持久化（原来只在内存，重启即丢） */
+    private fun saveLlmHistory() {
+        try {
+            val arr = org.json.JSONArray()
+            llmHistory.takeLast(12).forEach { (r, c) ->
+                arr.put(org.json.JSONObject().put("r", r).put("c", c))
+            }
+            config.llmHistoryJson = arr.toString()
+        } catch (t: Throwable) { L2DLog.w(L2DLog.Mod.AI, "对话历史保存失败", "err=${t.message}") }
+    }
+
+    /** v1.7.28：读回上次的对话历史 */
+    private fun loadLlmHistory() {
+        val raw = config.llmHistoryJson
+        if (raw.isBlank()) return
+        try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                llmHistory.add(o.getString("r") to o.getString("c"))
+            }
+            L2DLog.i(L2DLog.Mod.AI, "已恢复对话历史", "轮数=${llmHistory.size / 2}")
+        } catch (t: Throwable) { L2DLog.w(L2DLog.Mod.AI, "对话历史解析失败", "err=${t.message}") }
+    }
+
     /**
      * v1.7.13：走真实 LLM 的一轮对话 —— **LLM 只出语义，页面把它编译成有时长的表演**。
      *
@@ -816,6 +862,7 @@ class MainActivity : AppCompatActivity() {
                 llmHistory.add("user" to userText)
                 llmHistory.add("assistant" to sem.reply)
                 while (llmHistory.size > 12) llmHistory.removeAt(0)
+                saveLlmHistory()   // v1.7.28：持久化，重启后还记得
 
                 binding.tvLlmStatus.text = "角色：${sem.reply}\n" +
                         "（${sem.emotion} · 强度${"%.2f".format(sem.intensity)} · " +

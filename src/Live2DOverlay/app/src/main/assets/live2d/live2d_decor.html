@@ -1444,6 +1444,7 @@
   let slLastTapAt = 0;
   let slAutoPulseAt = 0;
   let slLastIdleEmotion = "";
+  let slPulseCount = 0;   // v1.7.28：自发表演计数，每 3 次改成「主动搭话」
 
   /**
    * 触发一次明确情绪。点击与自发表演共用。
@@ -1500,6 +1501,20 @@
     //   姿态的 V 门槛抬到 0.55 后（姿态语义=反应，不是待机状态），
     //   自发表演必须能把 V 推过 0.55，否则待机期间一个姿态都不出现、
     //   幅度从 Δ47 掉到 Δ7（实测）。提高强度让姿态每 20~45 秒短暂出现一次。
+    // v1.7.28：每 3 次自发表演，改成「主动搭话」—— 让 Kotlin 走一次 LLM 真说一句。
+    //（引擎也有 proactive 能力，但那条路要页面轮询 consumeProactive 再回调原生，链路更长；
+    //  复用现成的定时器 + askLlmAndPerform 达到同样效果，且台词是真的。）
+    slPulseCount++;
+    if (slPulseCount % 3 === 0) {
+      try {
+        const bridge = window.MikuLive2DAndroid;
+        if (bridge && bridge.onProactive) {
+          bridge.onProactive();
+          LOG.i(M.AI, "已请求主动搭话", "第 " + slPulseCount + " 次自发表演");
+          return;
+        }
+      } catch (e) {}
+    }
     playSoullinkPerformance(emo, 0.60 + Math.random() * 0.25,
       3000 + Math.random() * 2500, "auto_idle");
   }

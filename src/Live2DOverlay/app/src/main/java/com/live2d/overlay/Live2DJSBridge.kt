@@ -19,6 +19,7 @@ import org.json.JSONObject
 class Live2DJSBridge(private val listener: Listener) {
 
     interface Listener {
+        fun onProactive()
         /** 收到来自渲染 ticker 内部的心跳，说明 WebGL 上下文健康 */
         fun onRenderHeartbeat(type: String)
 
@@ -106,6 +107,12 @@ class Live2DJSBridge(private val listener: Listener) {
 
     @JavascriptInterface
     fun heartbeat(type: String?) {
+        // v1.7.28：页面请求「主动搭话」
+        @JavascriptInterface
+        fun onProactive() {
+            listener.onProactive()
+        }
+
         lastHeartbeatAt = System.currentTimeMillis()
         listener.onRenderHeartbeat(type ?: "tick")
     }

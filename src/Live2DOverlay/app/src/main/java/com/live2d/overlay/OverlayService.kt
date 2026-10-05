@@ -1492,6 +1492,13 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
         bridge = null
     }
 
+    /** v1.7.28：页面请求主动搭话 → 转发给 Activity（它持有 LLM 客户端） */
+    override fun onProactive() {
+        L2DLog.i(L2DLog.Mod.AI, "收到主动搭话请求")
+        // 服务里没有 LLM 客户端（它在 Activity），所以走一个静态回调
+        MainActivity.proactiveHandler?.invoke()
+    }
+
     override fun onDestroy() {
         isRunning = false
         detachOverlay()

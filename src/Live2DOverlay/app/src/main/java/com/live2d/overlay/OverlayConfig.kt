@@ -47,6 +47,9 @@ class OverlayConfig(context: Context) {
         /** v1.7.18：对话时是否自动朗读（TTS） */
         const val KEY_VOICE_ENABLED = "voice_enabled"
 
+        /** v1.7.28：对话历史（JSON 数组），重启后恢复 */
+        const val KEY_LLM_HISTORY = "llm_history_json"
+
         /** v1.7.23：调参界面的参数（一个 JSON 串，避免为每个旋钮加一个 pref） */
         const val KEY_TUNE_JSON = "tune_json"
 
@@ -210,6 +213,11 @@ class OverlayConfig(context: Context) {
      * 用一个 JSON 串而不是给每个旋钮加一个 pref：旋钮会增减，串更好扩展；
      * 而且页面侧本来就是按 key 读的，天然对齐。空串 = 用引擎默认值。
      */
+    /** v1.7.28：对话历史 JSON（跨会话记忆） */
+    var llmHistoryJson: String
+        get() = prefs.getString(KEY_LLM_HISTORY, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_LLM_HISTORY, v).apply()
+
     var tuneJson: String
         get() = prefs.getString(KEY_TUNE_JSON, "") ?: ""
         set(v) = prefs.edit().putString(KEY_TUNE_JSON, v).apply()
