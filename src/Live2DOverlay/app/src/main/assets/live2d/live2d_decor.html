@@ -1505,6 +1505,15 @@
     //（引擎也有 proactive 能力，但那条路要页面轮询 consumeProactive 再回调原生，链路更长；
     //  复用现成的定时器 + askLlmAndPerform 达到同样效果，且台词是真的。）
     slPulseCount++;
+    // v1.7.30 诊断：主动搭话为什么没触发？看桥到底有没有这个方法
+    try {
+      const bg = window.MikuLive2DAndroid;
+      LOG.d(M.AI, "自发表演计数",
+        "n=" + slPulseCount +
+        " hasBridge=" + !!bg +
+        " hasOnProactive=" + !!(bg && bg.onProactive) +
+        " keys=" + (bg ? Object.keys(bg).slice(0, 14).join(",") : "-"));
+    } catch (e) {}
     if (slPulseCount % 3 === 0) {
       try {
         const bridge = window.MikuLive2DAndroid;
