@@ -1985,6 +1985,53 @@
   //
   // ★ 刻意不含 ParamMouthOpenY —— 那是 LipSync 独占的，乘它会破坏口型。
   // ==================================================================
+  // ==================================================================
+  // v1.7.26：页面侧「表情层」—— 让脸活起来
+  //
+  // 为什么必须自己来：FACS 诊断实测 **eyeSmileL/R 恒为 0.000**，
+  // 引擎的 expression generator 不产出眼笑。所以调 scale / 加 gain 都是「乘 0 还是 0」。
+  //
+  // 这里按 VAD + 已有的 FACS 推几路引擎不管的参数：
+  //   ① 眼笑   ← 愉悦度 + 嘴笑（笑的时候眼睛会弯）
+  //   ② 眉毛   ← 引擎的 browInnerUp 太小（0.04~0.06），放大 + 加一点唤醒度
+  //   ③ 眼珠扫视 ← 低频双正弦，避免「死鱼眼」（叠加在引擎值上，不是替换）
+  //
+  // ★ 不碰 ParamEyeLOpen（眨眼归 Soullink）、不碰 ParamMouthOpenY（归 LipSync）。
+  // ==================================================================
+  let faceGain = 1;      // 由调参界面设置
+  let faceT = 0;         // 眼珠扫视的相位
+
+  /** 在引擎写完参数之后调用，覆盖/叠加几路表情参数 */
+  function applyFaceLayer(snap, ps) {
+    try {
+      const vad = snap && snap.vad ? snap.vad.current : null;
+      if (!vad) return;
+      const f = (snap && snap.facs) || {};
+      const v = Math.max(0, Math.min(1, vad.valence));
+      const a = Math.max(0, Math.min(1, (vad.arousal + 1) / 2));
+      const mouthSmile = Math.max(0, Math.min(1, f.mouthSmile || 0));
+
+      // ① 眼笑：愉悦 + 嘴笑 都会让眼睛弯起来
+      const eyeSmile = Math.max(0, Math.min(1, (v * 0.7 + mouthSmile * 0.6) * faceGain));
+      setParam("ParamEyeLSmile", eyeSmile);
+      setParam("ParamEyeRSmile", eyeSmile);
+
+      // ② 眉毛：把引擎那点 browInnerUp 放大，再叠一点唤醒度
+      const brow = Math.max(0, Math.min(1, ((f.browInnerUp || 0) * 2.5 + a * 0.15) * faceGain));
+      setParam("ParamBrowLY", brow);
+      setParam("ParamBrowRY", brow);
+
+      // ③ 眼珠扫视：低频双正弦叠加在引擎值上（引擎的 gaze 实测只有 0.00~0.07）
+      faceT += 0.016;
+      const gx = (Math.sin(faceT * 0.37) * 0.35 + Math.sin(faceT * 0.13) * 0.2) * faceGain;
+      const gy = Math.sin(faceT * 0.29 + 1.7) * 0.22 * faceGain;
+      const bx = ps["ParamEyeBallX"] || 0;
+      const by = ps["ParamEyeBallY"] || 0;
+      setParam("ParamEyeBallX", Math.max(-1, Math.min(1, bx + gx * 0.6)));
+      setParam("ParamEyeBallY", Math.max(-1, Math.min(1, by + gy * 0.6)));
+    } catch (e) { /* 表情层失败不该影响主循环 */ }
+  }
+
   const EXPR_PARAMS = {
     ParamEyeLSmile: 1, ParamEyeRSmile: 1,
     ParamBrowLY: 1, ParamBrowRY: 1, ParamBrowLForm: 1, ParamBrowRForm: 1,
@@ -2053,6 +2100,10 @@
       if (typeof t.parameterGain === "number") {
         soullinkRuntime.setParameterGain(t.parameterGain);
         applied.push("parameterGain=" + t.parameterGain);
+      }
+      if (typeof t.faceGain === "number") {
+        faceGain = t.faceGain;
+        applied.push("faceGain=" + t.faceGain);
       }
       if (typeof t.expressionGain === "number") {
         exprGain = t.expressionGain;
@@ -2201,6 +2252,8 @@
         // v1.7.25：表情类参数乘一道增益（其余原样）
         setParam(k, EXPR_PARAMS[k] ? ps[k] * exprGain : ps[k]);
       }
+      // v1.7.26：引擎写完之后，再叠一层页面侧表情（眼笑/眉/眼珠）
+      applyFaceLayer(snap, ps);
       slAccumulate(ps);
       soullinkFrames++;
       // 每 600 帧（约 10 秒）汇报一次；平时不刷日志。

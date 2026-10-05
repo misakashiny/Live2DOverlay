@@ -953,6 +953,8 @@ class MainActivity : AppCompatActivity() {
         bind(binding.seekTuneMicro, binding.tvTuneMicro, "microMotionGain", 0f, 2f, 1f)
         // v1.7.25：表情增益（页面侧乘在表情类参数上）
         bind(binding.seekTuneExpr, binding.tvTuneExpr, "expressionGain", 0.5f, 4f, 1f)
+        // v1.7.26：脸部表情（页面侧自己驱动的眼笑/眉/眼珠）
+        bind(binding.seekTuneFace, binding.tvTuneFace, "faceGain", 0f, 3f, 1f)
         // v1.7.25：复制当前值 —— 便于把调好的数值交给开发者固化
         binding.btnTuneCopy.setOnClickListener {
             val json = config.tuneJson.ifBlank { "{}" }
@@ -967,6 +969,7 @@ class MainActivity : AppCompatActivity() {
                 .put("idleActionGain", 1.9)
                 .put("microMotionGain", 1.9)
                 .put("expressionGain", 2.5)
+                .put("faceGain", 1.6)
             cur.clear()
             for (k in rec.keys()) cur[k] = rec.getDouble(k).toFloat()
             push()
@@ -976,6 +979,7 @@ class MainActivity : AppCompatActivity() {
             binding.seekTuneIdle.progress = (((1.9f - 0f) / (2f - 0f)) * 100f).toInt()
             binding.seekTuneMicro.progress = (((1.9f - 0f) / (2f - 0f)) * 100f).toInt()
             binding.seekTuneExpr.progress = (((2.5f - 0.5f) / (4f - 0.5f)) * 100f).toInt()
+            binding.seekTuneFace.progress = (((1.6f - 0f) / (3f - 0f)) * 100f).toInt()
             toast("已填入推荐值")
         }
         binding.btnTuneReset.setOnClickListener {
