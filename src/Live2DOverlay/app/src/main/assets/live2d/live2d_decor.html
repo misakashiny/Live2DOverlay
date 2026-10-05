@@ -2295,13 +2295,17 @@
     try {
       const snap = soullinkRuntime.update(nowSec, dt);
       const ps = snap.live2dParams || {};
+      // v1.7.29：开一个「最终值」容器，setParam 会把实际写入的值记进去
+      slFinalVals = Object.create(null);
       for (const k in ps) {
         // v1.7.25：表情类参数乘一道增益（其余原样）
         setParam(k, EXPR_PARAMS[k] ? ps[k] * exprGain : ps[k]);
       }
       // v1.7.26：引擎写完之后，再叠一层页面侧表情（眼笑/眉/眼珠）
       applyFaceLayer(snap, ps);
-      slAccumulate(ps);
+      // ★ 统计**最终值**而不是引擎输出（修掉诊断盲区）
+      slAccumulate(slFinalVals);
+      slFinalVals = null;
       soullinkFrames++;
       // 每 600 帧（约 10 秒）汇报一次；平时不刷日志。
       // 窗口取 10 秒而不是 5 秒 —— 「动画时长」是统计问题，窗口太短看不出占空比。
@@ -3110,7 +3114,15 @@
     return -1;
   }
 
+  // v1.7.29：诊断用 —— 记录「本帧最终写入模型」的值。
+  //
+  // 之前的诊断统计的是 ps（**引擎的输出**），测不到页面侧后处理
+  //（expressionGain / applyFaceLayer / 嘴型收敛）的效果 —— 那是盲区。
+  // 现在由 setParam 记录最终值，tickSoullink 统计它。
+  let slFinalVals = null;
+
   function setParam(id, value) {
+    if (slFinalVals) slFinalVals[id] = value;   // 记录最终值（诊断用）
     const core = getCoreModel();
     if (!core) return false;
 

@@ -249,6 +249,24 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // ★ v1.7.29：统一先确保进入前台。
+        //
+        // 系统要求：startForegroundService() 之后，服务必须在 5 秒内调用 startForeground()，
+        // 否则抛 ForegroundServiceDidNotStartInTimeException **直接杀进程**。
+        //
+        // 原来只有 else 分支调 startAsForeground()，所以 TOAST / SPEAK / PERFORM / SET_ALPHA …
+        // 这些分支**若先到达**（例如服务刚被拉起、Activity 立刻投一个 TOAST），
+        // 服务就永远不会进前台 → 5 秒后崩。
+        //
+        // 真机实测到过（dropbox: data_app_crash，包 v35/1.7.28）：
+        //   ForegroundServiceDidNotStartInTimeException
+        //   栈顶 MainActivity.safeStartService ← askLlmAndPerform 里的 ACTION_SOULLINK_TOAST
+        //
+        // ACTION_STOP 除外 —— 那是要停服务，不该先进前台。
+        // startForeground() 本身幂等，重复调用无害。
+        if (intent?.action != ACTION_STOP) {
+            startAsForeground()
+        }
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelfSafely()
