@@ -1441,6 +1441,7 @@
 
   let slLastTapAt = 0;
   let slAutoPulseAt = 0;
+  let slLastIdleEmotion = "";
 
   /**
    * 触发一次明确情绪。点击与自发表演共用。
@@ -1483,9 +1484,16 @@
     if (!soullinkReady) return;
     if (nowSec < slAutoPulseAt) return;
     // v1.7.8：改走「有时长的表演」（原来走 triggerIntent，会把 VAD 推高导致姿态锁死）
-    slAutoPulseAt = nowSec + 20 + Math.random() * 25;
+    // v1.7.25：间隔 20~45s → 10~25s（用户反馈「动作不够频繁」）
+    slAutoPulseAt = nowSec + 10 + Math.random() * 15;
+    // v1.7.25：轮换而不是纯随机 —— 避免连续两次抽到同一个情绪
+    //（纯随机下 4 选 1 有 25% 概率连续重复，观感上像「卡在同一个动作」）
     const pool = SL_IDLE_EMOTIONS;
-    const emo = pool[Math.floor(Math.random() * pool.length)];
+    let emo = pool[Math.floor(Math.random() * pool.length)];
+    if (emo === slLastIdleEmotion && pool.length > 1) {
+      emo = pool[(pool.indexOf(emo) + 1) % pool.length];
+    }
+    slLastIdleEmotion = emo;
     // v1.7.23：强度 0.45~0.65 → 0.60~0.85。
     //   姿态的 V 门槛抬到 0.55 后（姿态语义=反应，不是待机状态），
     //   自发表演必须能把 V 推过 0.55，否则待机期间一个姿态都不出现、
@@ -1782,6 +1790,12 @@
         });
       }
       soullinkRuntime.setVoicePlaybackActive(true);
+      // v1.7.25：语音播放时给一个视觉指示 —— 只在没有字幕时显示，避免盖住台词
+      try {
+        if (!subtitleEl || subtitleEl.style.opacity !== "1") {
+          showSubtitle("♪ 正在说话…", Math.min(6000, Number(fallbackMs) || 3000));
+        }
+      } catch (e) {}
       LOG.i(M.AI, "语音开始播放",
         "srcLen=" + u.length + " 兜底时长=" + (Number(fallbackMs) || 0) + "ms");
       return true;
@@ -1961,6 +1975,23 @@
   // 比例放在 profile.hitRegions 里可调，便于按模型体型微调（不用重编译）。
   // ==================================================================
 
+  // ==================================================================
+  // v1.7.25：表情增益 —— 用户反馈「只有点头摇头、表情没在动」。
+  //
+  // 诊断：eyeSmile/mouthSmile 的 scale 已经是 1（正确，FACS 与参数都是 0~1），
+  // 但实测 EyeLSmile Δ0.06 / MouthForm Δ0.05 / BrowLY Δ0.03 ——
+  // **引擎输出的表情值本身就小**（CharacterPersonality.expressiveness 已设 1.0 上限）。
+  // → 页面侧加一道增益，只乘「表情类」参数（都是 0~1 或 -1~1，乘了安全）。
+  //
+  // ★ 刻意不含 ParamMouthOpenY —— 那是 LipSync 独占的，乘它会破坏口型。
+  // ==================================================================
+  const EXPR_PARAMS = {
+    ParamEyeLSmile: 1, ParamEyeRSmile: 1,
+    ParamBrowLY: 1, ParamBrowRY: 1, ParamBrowLForm: 1, ParamBrowRForm: 1,
+    ParamMouthForm: 1, ParamEyeBallX: 1, ParamEyeBallY: 1
+  };
+  let exprGain = 1;   // 由调参界面设置
+
   const DEFAULT_HIT_REGIONS = {
     headY: 0.30,                                   // 头顶到多少算「头」
     faceY: 0.10, faceX0: 0.32, faceX1: 0.68,       // 头部里「脸」的范围
@@ -2022,6 +2053,10 @@
       if (typeof t.parameterGain === "number") {
         soullinkRuntime.setParameterGain(t.parameterGain);
         applied.push("parameterGain=" + t.parameterGain);
+      }
+      if (typeof t.expressionGain === "number") {
+        exprGain = t.expressionGain;
+        applied.push("expressionGain=" + t.expressionGain);
       }
       if (typeof t.bodyMotionGain === "number") {
         soullinkRuntime.setBodyMotionGain(t.bodyMotionGain);
@@ -2162,7 +2197,10 @@
     try {
       const snap = soullinkRuntime.update(nowSec, dt);
       const ps = snap.live2dParams || {};
-      for (const k in ps) setParam(k, ps[k]);
+      for (const k in ps) {
+        // v1.7.25：表情类参数乘一道增益（其余原样）
+        setParam(k, EXPR_PARAMS[k] ? ps[k] * exprGain : ps[k]);
+      }
       slAccumulate(ps);
       soullinkFrames++;
       // 每 600 帧（约 10 秒）汇报一次；平时不刷日志。
@@ -2176,6 +2214,19 @@
           " D=" + (snap.vad ? snap.vad.current.dominance.toFixed(2) : "?"));
         // v1.7.5 诊断：这一窗口内参数的真实摆幅 + 激活/运动占空比
         LOG.d(M.AI, "Soullink 幅度(" + (slStat ? slStat.n : 0) + "帧)", slReport());
+        // v1.7.25：同时报引擎的**原始 FACS**值 —— 区分「引擎没输出」与「映射被压小」
+        try {
+          const f = snap.facs || {};
+          LOG.d(M.AI, "Soullink FACS",
+            "eyeSmileL=" + (f.eyeSmileL || 0).toFixed(3) +
+            " eyeSmileR=" + (f.eyeSmileR || 0).toFixed(3) +
+            " browInnerUp=" + (f.browInnerUp || 0).toFixed(3) +
+            " mouthSmile=" + (f.mouthSmile || 0).toFixed(3) +
+            " mouthFrown=" + (f.mouthFrown || 0).toFixed(3) +
+            " eyeOpenL=" + (f.eyeOpenL || 0).toFixed(3) +
+            " gazeX=" + (f.gazeX || 0).toFixed(3) +
+            " gazeY=" + (f.gazeY || 0).toFixed(3));
+        } catch (e) {}
         slStat = null;
       }
     } catch (e) {

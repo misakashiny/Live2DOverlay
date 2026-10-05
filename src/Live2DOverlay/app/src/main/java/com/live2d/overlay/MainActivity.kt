@@ -951,6 +951,33 @@ class MainActivity : AppCompatActivity() {
         bind(binding.seekTuneBody, binding.tvTuneBody, "bodyMotionGain", 0f, 4f, 1.25f)
         bind(binding.seekTuneIdle, binding.tvTuneIdle, "idleActionGain", 0f, 2f, 1f)
         bind(binding.seekTuneMicro, binding.tvTuneMicro, "microMotionGain", 0f, 2f, 1f)
+        // v1.7.25：表情增益（页面侧乘在表情类参数上）
+        bind(binding.seekTuneExpr, binding.tvTuneExpr, "expressionGain", 0.5f, 4f, 1f)
+        // v1.7.25：复制当前值 —— 便于把调好的数值交给开发者固化
+        binding.btnTuneCopy.setOnClickListener {
+            val json = config.tuneJson.ifBlank { "{}" }
+            copyToClipboard(json)
+            toast("已复制调参值，详见运行日志")
+        }
+        // v1.7.25：一键填入推荐值（我按实测调的：不撞顶 + 表情放大）
+        binding.btnTuneRecommend.setOnClickListener {
+            val rec = org.json.JSONObject()
+                .put("parameterGain", 3.0)
+                .put("bodyMotionGain", 3.5)
+                .put("idleActionGain", 1.9)
+                .put("microMotionGain", 1.9)
+                .put("expressionGain", 2.5)
+            cur.clear()
+            for (k in rec.keys()) cur[k] = rec.getDouble(k).toFloat()
+            push()
+            // 回填滑条显示
+            binding.seekTuneParam.progress = (((3.0f - 0.4f) / (5f - 0.4f)) * 100f).toInt()
+            binding.seekTuneBody.progress = (((3.5f - 0f) / (4f - 0f)) * 100f).toInt()
+            binding.seekTuneIdle.progress = (((1.9f - 0f) / (2f - 0f)) * 100f).toInt()
+            binding.seekTuneMicro.progress = (((1.9f - 0f) / (2f - 0f)) * 100f).toInt()
+            binding.seekTuneExpr.progress = (((2.5f - 0.5f) / (4f - 0.5f)) * 100f).toInt()
+            toast("已填入推荐值")
+        }
         binding.btnTuneReset.setOnClickListener {
             cur.clear()
             push()

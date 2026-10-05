@@ -34,7 +34,8 @@
       "v1.7.21：qqMode V0.30→0.52 A0.34→0.44（用户反馈太频繁）；spin A 下限 0.20→0.26",
       "v1.7.22：改用「同组 A 窗口不重叠切分」而不是抬高单个门槛 —— miku_pose: spin A[0.20,0.32] / qqMode A[0.31,0.44]；miku_prop: scallion A[0.20,0.30] / sing A[0.29,0.40] / heart A[0.39,0.52]",
       "v1.7.23：所有姿态 V 下限 0.30→0.55 —— 姿态语义上是「反应」而非「待机状态」；待机 V≈0.40 时不出现，只有点击/对话/表演推高 V 时才出现",
-      "v1.7.22：身体动作增益 bodyMotionGain=3.5（引擎默认 1.25，上限 4）；bodyX/Y/Z scale 42→70 —— 用户反馈「只有点头摇头、身体没啥动作」"
+      "v1.7.22：身体动作增益 bodyMotionGain=3.5（引擎默认 1.25，上限 4）；bodyX/Y/Z scale 42→70 —— 用户反馈「只有点头摇头、身体没啥动作」",
+      "v1.7.25：gestureFrequency 2.0→2.5（上限）；姿态 V 门槛 0.55→0.45（姿态更常出现）"
     ]
   },
   "schemaVersion": 2,
@@ -344,7 +345,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.3,
+          0.45,
           0.95
         ],
         "arousal": [
@@ -375,7 +376,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.45,
           1
         ],
         "arousal": [
@@ -399,7 +400,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.45,
           1
         ],
         "arousal": [
@@ -423,7 +424,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.45,
           1
         ],
         "arousal": [
@@ -448,7 +449,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.45,
           1
         ],
         "arousal": [
@@ -473,7 +474,7 @@
       "triggerMode": "any",
       "vadRange": {
         "valence": [
-          0.55,
+          0.45,
           1
         ],
         "arousal": [
@@ -495,7 +496,7 @@
     "idleActionGain": 1.9,
     "microMotionGain": 1.9,
     "spontaneity": 2,
-    "gestureFrequency": 2,
+    "gestureFrequency": 2.5,
     "blinkRate": 1.2,
     "breathVariance": 0.7,
     "gazeStability": 0.5,
