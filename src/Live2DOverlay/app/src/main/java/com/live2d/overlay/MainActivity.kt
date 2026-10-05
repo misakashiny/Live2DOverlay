@@ -800,6 +800,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         binding.tvLlmStatus.text = "思考中…"
+        // v1.7.27：LLM 要 1~2 秒，这期间界面完全没反应 —— 给个瞬时反馈
+        safeStartService(Intent(this, OverlayService::class.java).apply {
+            setAction(OverlayService.ACTION_SOULLINK_TOAST)
+            putExtra("text", "…")
+            putExtra("ms", 2000)
+        })
         LlmClient.converse(this, userText, llmHistory) { sem, err ->
             runOnUiThread {
                 if (sem == null) {

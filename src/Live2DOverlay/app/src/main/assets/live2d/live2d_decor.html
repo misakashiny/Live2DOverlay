@@ -183,6 +183,7 @@
   let pointerStartX = 0;
   let pointerStartY = 0;
   let pointerLastX = 0;
+  let pointerLastAt = 0;   // v1.7.27：最后一次指针活动时间（用于目光跟随的衰减）
   let pointerLastY = 0;
   let pointerDownAt = 0;
   let dragging = false;            // 是否已升级为拖拽
@@ -1285,6 +1286,7 @@
                   "ParamEyeLSmile", "ParamBrowLY",
                   // ★ v1.7.5：把 7 个离散姿态参数也纳入统计 ——
                   // 否则「离散动作到底有没有触发」是盲的（它们的门槛靠 VAD，最容易调错）。
+                  "ParamBodyAngleY", "ParamBodyAngleZ",
                   "Param125", "Param130", "Param131", "Param132",
                   "Param133", "Param134", "Param135", "Param136"];
     const n = slStat.n;
@@ -2021,14 +2023,44 @@
       setParam("ParamBrowLY", brow);
       setParam("ParamBrowRY", brow);
 
+      // ①b v1.7.27：嘴型收敛 —— 实测 MouthForm 0.75~1.00（几乎一直咧嘴），
+      //     可能是引擎的 mouthSmile 映射偏高。这里往中性收 40%。
+      const mf = ps["ParamMouthForm"];
+      if (typeof mf === "number") setParam("ParamMouthForm", mf * 0.6);
+
+      // ①c v1.7.27：目光跟随 —— 优先「看着你」，而不是随机扫视。
+      //     引擎的 gazeX 实测恒为 0，所以只能自己来。
+      //     用最后一次指针位置换算成相对模型中心的 -1~1；停手 4 秒后衰减回中心。
+      let followX = 0, followY = 0, followW = 0;
+      try {
+        const bb = (typeof computeModelBounds === "function") ? computeModelBounds() : null;
+        const idleSec = (Date.now() - pointerLastAt) / 1000;
+        followW = Math.max(0, 1 - idleSec / 4);
+        if (bb && bb.r > bb.l && bb.b > bb.t && pointerLastAt > 0) {
+          const nx = ((pointerLastX - bb.l) / (bb.r - bb.l)) * 2 - 1;
+          const ny = ((pointerLastY - bb.t) / (bb.b - bb.t)) * 2 - 1;
+          followX = Math.max(-1, Math.min(1, nx)) * followW;
+          followY = Math.max(-1, Math.min(1, ny)) * followW;
+        }
+      } catch (e) {}
+
       // ③ 眼珠扫视：低频双正弦叠加在引擎值上（引擎的 gaze 实测只有 0.00~0.07）
       faceT += 0.016;
       const gx = (Math.sin(faceT * 0.37) * 0.35 + Math.sin(faceT * 0.13) * 0.2) * faceGain;
       const gy = Math.sin(faceT * 0.29 + 1.7) * 0.22 * faceGain;
       const bx = ps["ParamEyeBallX"] || 0;
       const by = ps["ParamEyeBallY"] || 0;
-      setParam("ParamEyeBallX", Math.max(-1, Math.min(1, bx + gx * 0.6)));
-      setParam("ParamEyeBallY", Math.max(-1, Math.min(1, by + gy * 0.6)));
+      // 跟随权重高时以「看你」为主，否则用扫视兜底（避免死鱼眼）
+      const eyeX = followX * 0.85 + gx * 0.6 * (1 - followW);
+      const eyeY = followY * 0.85 + gy * 0.6 * (1 - followW);
+      setParam("ParamEyeBallX", Math.max(-1, Math.min(1, bx * (1 - followW) + eyeX)));
+      setParam("ParamEyeBallY", Math.max(-1, Math.min(1, by * (1 - followW) + eyeY)));
+      // 头部也轻微转向目光方向（幅度小，只加「在意你」的感觉）
+      if (followW > 0.05) {
+        const hax = ps["ParamAngleX"] || 0, haz = ps["ParamAngleZ"] || 0;
+        setParam("ParamAngleX", hax + followX * 6 * followW);
+        setParam("ParamAngleZ", haz - followX * 4 * followW);
+      }
     } catch (e) { /* 表情层失败不该影响主循环 */ }
   }
 
@@ -2587,7 +2619,7 @@
     cancelEdgeSnap();
     pointerStartX = x;
     pointerStartY = y;
-    pointerLastX = x;
+    pointerLastX = x; pointerLastAt = Date.now();
     pointerLastY = y;
     pointerDownAt = Date.now();
 
@@ -2663,7 +2695,7 @@
       reportHitArea(false);
     }
 
-    pointerLastX = x;
+    pointerLastX = x; pointerLastAt = Date.now();
     pointerLastY = y;
   }
 

@@ -162,6 +162,9 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
          */
         const val ACTION_SOULLINK_TUNE = "com.live2d.overlay.action.SOULLINK_TUNE"
 
+        /** v1.7.27：显示一条字幕（用于「正在思考…」这类瞬时反馈） */
+        const val ACTION_SOULLINK_TOAST = "com.live2d.overlay.action.SOULLINK_TOAST"
+
         /** v1.7.16：停止语音 */
         const val ACTION_SOULLINK_STOP_SPEAK = "com.live2d.overlay.action.SOULLINK_STOP_SPEAK"
 
@@ -361,6 +364,15 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                     val quoted = org.json.JSONObject.quote(json)
                     evalJsQuiet("window.__mikuLive2DApplyTune && window.__mikuLive2DApplyTune($quoted)")
                     L2DLog.i(L2DLog.Mod.AI, "调参已投递", json)
+                }
+                return START_STICKY
+            }
+            ACTION_SOULLINK_TOAST -> {
+                val text = intent.getStringExtra("text")
+                val ms = intent.getIntExtra("ms", 2500)
+                if (!text.isNullOrBlank()) {
+                    val q = org.json.JSONObject.quote(text)
+                    evalJsQuiet("window.__mikuLive2DShowSubtitle && window.__mikuLive2DShowSubtitle($q, $ms)")
                 }
                 return START_STICKY
             }
