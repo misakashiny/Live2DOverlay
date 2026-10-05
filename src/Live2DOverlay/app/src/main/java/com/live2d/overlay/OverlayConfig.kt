@@ -50,6 +50,9 @@ class OverlayConfig(context: Context) {
         /** v1.7.28：对话历史（JSON 数组），重启后恢复 */
         const val KEY_LLM_HISTORY = "llm_history_json"
 
+        /** v1.7.30：语音排队模式（false=打断，true=排队） */
+        const val KEY_VOICE_QUEUE = "voice_queue"
+
         /** v1.7.23：调参界面的参数（一个 JSON 串，避免为每个旋钮加一个 pref） */
         const val KEY_TUNE_JSON = "tune_json"
 
@@ -217,6 +220,11 @@ class OverlayConfig(context: Context) {
     var llmHistoryJson: String
         get() = prefs.getString(KEY_LLM_HISTORY, "") ?: ""
         set(v) = prefs.edit().putString(KEY_LLM_HISTORY, v).apply()
+
+    /** v1.7.30：语音排队模式 —— false 打断（默认），true 排队 */
+    var voiceQueueMode: Boolean
+        get() = prefs.getBoolean(KEY_VOICE_QUEUE, false)
+        set(v) = prefs.edit().putBoolean(KEY_VOICE_QUEUE, v).apply()
 
     var tuneJson: String
         get() = prefs.getString(KEY_TUNE_JSON, "") ?: ""

@@ -1773,13 +1773,30 @@
    * @param {string} url 音频地址；**建议 data: URL**（同源，避免 WebAudio 静音）
    * @param {number} [fallbackMs] 无法读取时长时的兜底
    */
-  window.__mikuLive2DSpeak = function(url, fallbackMs) {
+  // v1.7.30：语音排队/打断
+  //   打断（默认）：直接换 src，正在播的被截断 —— 这是原来的行为
+  //   排队：正在播时把新的推进队列，播完自动接上（长回复/主动搭话连发时不会互相截断）
+  let speakQueue = [];
+  let speakPlaying = false;
+
+  window.__mikuLive2DSpeak = function(url, fallbackMs, queueMode) {
     if (!soullinkReady || !soullinkRuntime) {
       LOG.w(M.AI, "Soullink 未就绪，语音已丢弃", "ready=" + soullinkReady);
       return false;
     }
     const u = String(url || "");
     if (!u) { LOG.w(M.AI, "语音地址为空"); return false; }
+    // v1.7.30：排队模式下，正在播就排队而不是打断
+    if (queueMode) {
+      if (speakPlaying) {
+        if (speakQueue.length >= 4) speakQueue.shift();   // 队列上限 4，丢最旧的
+        speakQueue.push({ url: u, ms: fallbackMs });
+        LOG.i(M.AI, "语音已入队", "队列=" + speakQueue.length);
+        return true;
+      }
+    } else {
+      speakQueue.length = 0;   // 打断模式：清掉积压
+    }
     try {
       const el = ensureSpeakAudio();
       // AudioContext 需要用户手势后才能 resume（Android WebView 里通常已解锁）
@@ -1791,14 +1808,24 @@
       el.onended = function() {
         try {
           soullinkRuntime.setVoicePlaybackActive(false);
+          speakPlaying = false;
           LOG.i(M.AI, "语音播放结束");
+          // v1.7.30：队列里还有就接着播
+          if (speakQueue.length) {
+            const nx = speakQueue.shift();
+            LOG.i(M.AI, "语音出队续播", "剩余=" + speakQueue.length);
+            window.__mikuLive2DSpeak(nx.url, nx.ms, true);
+          }
         } catch (e) { /* 忽略 */ }
       };
       el.onerror = function() {
         LOG.w(M.AI, "语音播放出错", "src=" + u.slice(0, 48));
+        speakPlaying = false;
         try { soullinkRuntime.setVoicePlaybackActive(false); } catch (e) { /* 忽略 */ }
+        if (speakQueue.length) { const nx = speakQueue.shift(); window.__mikuLive2DSpeak(nx.url, nx.ms, true); }
       };
 
+      speakPlaying = true;
       el.src = u;
       const p = el.play();
       if (p && typeof p.catch === "function") {
@@ -1825,6 +1852,8 @@
   /** Android → 页面：停止语音 */
   window.__mikuLive2DStopSpeak = function() {
     try {
+      speakQueue.length = 0;
+      speakPlaying = false;
       if (speakAudioEl) { speakAudioEl.pause(); speakAudioEl.currentTime = 0; }
       if (soullinkReady && soullinkRuntime) soullinkRuntime.setVoicePlaybackActive(false);
       LOG.i(M.AI, "语音已停止");

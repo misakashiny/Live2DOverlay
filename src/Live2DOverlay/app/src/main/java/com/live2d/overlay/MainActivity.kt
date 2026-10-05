@@ -1072,7 +1072,10 @@ class MainActivity : AppCompatActivity() {
                 this,
                 SecureKeyStore.ttsBaseUrl(this),
                 ttsModel.ifEmpty { TtsClient.DEFAULT_MODEL },
-                ttsVoice.ifEmpty { TtsClient.DEFAULT_VOICE }
+                ttsVoice.ifEmpty { TtsClient.DEFAULT_VOICE },
+                // v1.7.30：采样率与格式改为可配置（原来硬编码 16000 / mp3）
+                binding.etTtsRate.text?.toString()?.trim()?.toIntOrNull() ?: 16000,
+                binding.etTtsFormat.text?.toString()?.trim().orEmpty().ifEmpty { "mp3" }
             )
             toast(if (ok && okTts) "凭据与语音配置已保存" else "保存失败")
             binding.etLlmKey.text?.clear()   // 保存后立刻清掉，不留明文
@@ -1085,6 +1088,14 @@ class MainActivity : AppCompatActivity() {
             config.voiceEnabled = checked
             L2DLog.i(L2DLog.Mod.AI, "语音朗读开关变更", "enabled=$checked")
             toast(if (checked) "对话时将自动朗读" else "已静音（表演与字幕照常）")
+        }
+
+        // v1.7.30：语音排队开关（关闭 = 打断上一句，这是原来的行为）
+        binding.switchVoiceQueue.isChecked = config.voiceQueueMode
+        binding.switchVoiceQueue.setOnCheckedChangeListener { _, checked ->
+            config.voiceQueueMode = checked
+            L2DLog.i(L2DLog.Mod.AI, "语音播放模式变更", if (checked) "排队" else "打断")
+            toast(if (checked) "语音将排队播放（不打断）" else "语音将打断上一句")
         }
 
         // v1.7.17：音色快捷选择（用户挑的三个）
@@ -1104,7 +1115,10 @@ class MainActivity : AppCompatActivity() {
             SecureKeyStore.saveTts(
                 this, SecureKeyStore.ttsBaseUrl(this),
                 m.ifEmpty { TtsClient.DEFAULT_MODEL },
-                v.ifEmpty { TtsClient.DEFAULT_VOICE }
+                v.ifEmpty { TtsClient.DEFAULT_VOICE },
+                // v1.7.30：试听也要落盘采样率/格式，否则改完不保存就试听会用旧的
+                binding.etTtsRate.text?.toString()?.trim()?.toIntOrNull() ?: 16000,
+                binding.etTtsFormat.text?.toString()?.trim().orEmpty().ifEmpty { "mp3" }
             )
             binding.tvLlmStatus.text = "语音合成中…（最长 60 秒）"
             TtsClient.synthesize(this, "你好呀，我是初音未来，很高兴见到你。") { speech, err ->
@@ -1296,6 +1310,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (binding.etTtsVoice.text.isNullOrBlank()) {
             binding.etTtsVoice.setText(SecureKeyStore.ttsVoice(this))
+        }
+        // v1.7.30：采样率与格式（可配置）
+        if (binding.etTtsRate.text.isNullOrBlank()) {
+            binding.etTtsRate.setText(SecureKeyStore.ttsSampleRate(this).toString())
+        }
+        if (binding.etTtsFormat.text.isNullOrBlank()) {
+            binding.etTtsFormat.setText(SecureKeyStore.ttsFormat(this))
         }
     }
 

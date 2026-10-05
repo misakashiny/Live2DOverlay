@@ -404,8 +404,10 @@ class OverlayService : Service(), Live2DJSBridge.Listener {
                 } else {
                     val quoted = org.json.JSONObject.quote(dataUrl)
                     evalJsQuiet(
-                        "window.__mikuLive2DSpeak && window.__mikuLive2DSpeak($quoted)")
-                    L2DLog.i(L2DLog.Mod.AI, "语音已投递", "dataUrl=${dataUrl.length}字符")
+                        "window.__mikuLive2DSpeak && window.__mikuLive2DSpeak($quoted, 0, " +
+                        (if (config.voiceQueueMode) "true" else "false") + ")")
+                    L2DLog.i(L2DLog.Mod.AI, "语音已投递",
+                        "dataUrl=${dataUrl.length}字符 模式=" + (if (config.voiceQueueMode) "排队" else "打断"))
                 }
                 return START_STICKY
             }

@@ -457,6 +457,46 @@
                 android:inputType="text"
                 android:textSize="12sp" />
 
+                <!-- v1.7.30：TTS 采样率与格式（原来硬编码 16000 / mp3） -->
+                <EditText
+                    android:id="@+id/et_tts_rate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="TTS 采样率（默认 16000；24000 会让 data URL 顶到 Binder 上限）"
+                    android:inputType="number"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/et_tts_format"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="TTS 格式（默认 mp3；注意百炼目前会忽略它，始终返回 wav）"
+                    android:inputType="text"
+                    android:textSize="13sp" />
+
+                <!-- v1.7.30：语音排队开关 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="语音排队播放（关闭=打断上一句）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+
+                    <Switch
+                        android:id="@+id/switch_voice_queue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

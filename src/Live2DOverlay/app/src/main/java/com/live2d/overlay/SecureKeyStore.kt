@@ -46,6 +46,22 @@ object SecureKeyStore {
     const val KEY_TTS_VOICE = "tts_voice"
 
     /**
+     * v1.7.30：TTS 采样率（默认 16000）。
+     *
+     * 为什么值得做成可配置：24000 会让 wav 体积翻倍，data URL 顶到 Binder 的 1MB 事务上限
+     * （v1.7.17 踩过：`safeStartService` 把异常吞了，服务侧一条日志都没有）。
+     */
+    const val KEY_TTS_SAMPLE_RATE = "tts_sample_rate"
+
+    /**
+     * v1.7.30：TTS 音频格式（默认 mp3）。
+     *
+     * ⚠️ 注意：百炼目前**忽略**这个字段，始终返回 `audio/x-wav`。
+     * 保留它是因为 API 形状如此，且将来可能生效。
+     */
+    const val KEY_TTS_FORMAT = "tts_format"
+
+    /**
      * TTS 配置。**复用同一个百炼 API Key**（`KEY_API`）——
      * 百炼的 LLM（兼容模式）与 TTS 用同一个 Key，不必让用户填两遍。
      */
@@ -65,13 +81,24 @@ object SecureKeyStore {
     fun hasTts(context: Context): Boolean = hasKey(context)
 
     /** 保存 TTS 配置（Key 沿用 `save()` 的那份，不在这里改） */
-    fun saveTts(context: Context, baseUrl: String, model: String, voice: String): Boolean {
+    /** v1.7.30：采样率（默认 16000） */
+    fun ttsSampleRate(context: Context): Int =
+        store(context)?.getString(KEY_TTS_SAMPLE_RATE, null)?.toIntOrNull() ?: 16000
+
+    /** v1.7.30：格式（默认 mp3，但百炼会忽略） */
+    fun ttsFormat(context: Context): String =
+        store(context)?.getString(KEY_TTS_FORMAT, null)?.takeIf { it.isNotBlank() } ?: "mp3"
+
+    fun saveTts(context: Context, baseUrl: String, model: String, voice: String,
+                sampleRate: Int = 16000, format: String = "mp3"): Boolean {
         val p = store(context) ?: return false
         return try {
             val e = p.edit()
             if (baseUrl.isBlank()) e.remove(KEY_TTS_BASE_URL) else e.putString(KEY_TTS_BASE_URL, baseUrl.trim())
             if (model.isBlank()) e.remove(KEY_TTS_MODEL) else e.putString(KEY_TTS_MODEL, model.trim())
             if (voice.isBlank()) e.remove(KEY_TTS_VOICE) else e.putString(KEY_TTS_VOICE, voice.trim())
+            e.putString(KEY_TTS_SAMPLE_RATE, sampleRate.toString())
+            if (format.isBlank()) e.remove(KEY_TTS_FORMAT) else e.putString(KEY_TTS_FORMAT, format.trim())
             val ok = e.commit()
             L2DLog.i(L2DLog.Mod.AI, "TTS 配置已保存",
                 "ok=$ok baseUrl=$baseUrl model=$model voice=$voice")

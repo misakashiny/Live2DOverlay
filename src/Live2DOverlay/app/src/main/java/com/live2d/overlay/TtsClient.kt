@@ -103,9 +103,9 @@ object TtsClient {
                         //   而 Java String 是 UTF-16，塞进 Intent extra 时按 665KB 算，
                         //   顶到 Binder 1MB 事务上限 → 语音投递失败（服务侧一条日志都没有）。
                         //   mp3 同长度约 1/6 体积，Intent 与 evaluateJavascript 都轻松。
-                        .put("format", "mp3")
+                        .put("format", SecureKeyStore.ttsFormat(context))
                         // 24kHz → 16kHz：语音够用，体积降 1/3，缓解 Intent/Binder 压力
-                        .put("sample_rate", 16000))
+                        .put("sample_rate", SecureKeyStore.ttsSampleRate(context)))
                     .toString()
                 val url = "$baseUrl/api/v1/services/aigc/multimodal-generation/generation"
                 val resp = postJson(url, apiKey, body)
