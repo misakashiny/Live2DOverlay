@@ -16,6 +16,10 @@ src/Live2DOverlay/build/
 src/Live2DOverlay/.gradle/
 src/Live2DOverlay/.kotlin/
 
+# ── 发布产物（APK 体积大且可重新构建，改走 GitHub Release 分发）─────────────
+artifacts/*.apk
+*.apk
+
 # ── 本机环境配置（含 sdk.dir，随机器变化；文件头已注明「不要提交」）─────────
 src/Live2DOverlay/local.properties
 
